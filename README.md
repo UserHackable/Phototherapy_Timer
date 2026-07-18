@@ -37,15 +37,15 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 | Role | Choice | Notes / link |
 |------|--------|----------------|
 | MCU | **ESP32** Type-C **38-pin narrow** + screw terminal breakout | Wi‑Fi + BT; DevKitC-style pinout. Details: [docs/esp32-board.md](docs/esp32-board.md). [Amazon B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X) |
-| Lamp drive | Solid-state relay (SSR) | One GPIO like an LED; switches mains AC to the fluorescent **ballasts**. [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
-| Input | 16-key **4×4 keypad** + I²C driver | Fast numeric entry plus spare keys for functions. [Amazon B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX) |
+| Lamp drive | **SSR-25DA** solid-state relay | GPIO control → mains AC to **ballasts**. Docs: [docs/peripherals.md](docs/peripherals.md). [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
+| Input | 16-key **4×4** membrane + **I²C** (PCF8574) adapter | Numeric + function keys. Docs: [docs/keypad-i2c.md](docs/keypad-i2c.md). [Amazon B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX) |
 | UI text | I²C **LCD1602** (16×2), blue backlight | **HD44780** + backpack **PCF8574AT** (A-variant); **5 V DC**. See [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md). [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
-| Time / countdown | I²C **4-digit 7-segment** (clock-style) | Preferred: [B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71) (I²C, clock layout). Alternate: [B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV) (decimal-point dots). Idle → wall clock; therapy → exposure / countdown. |
-| Audio | Piezo buzzer | Stock-style beeper; single GPIO. |
+| Time / countdown | **TM1637** 4-digit clock module (preferred) | **Not I²C** — **CLK + DIO** only; colon layout; DPs not usable. Docs: [docs/seven-segment-display.md](docs/seven-segment-display.md). [Amazon B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71). Alternate bare tube with DPs: [B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV). Idle → clock; therapy → countdown. |
+| Audio | Piezo buzzer | Stock-style beeper; single GPIO. [docs/peripherals.md](docs/peripherals.md) |
 
-**I²C bus (shared):** keypad driver, 16×2 LCD, and 7-segment module (addresses TBD once boards are on the bus; scan to confirm).
+**I²C bus (shared):** LCD backpack + keypad adapter only (scan addresses; avoid collision — LCD often **0x3F**).
 
-**GPIO (simple):** SSR enable, piezo; plus any board-level enable/reset lines as needed.
+**GPIO (simple):** SSR enable, piezo, **TM1637 CLK/DIO** (two pins); plus enable/reset as needed.
 
 ### ESP32 board (MCU)
 
@@ -81,6 +81,31 @@ From the module photo and NXP datasheet:
 | Non‑A range (for contrast) | PCF8574 / PCF8574T → **0x20–0x27** (all HIGH → **0x27**) — *not* this chip |
 
 **Manual:** use the NXP product data sheet — [PCF8574; PCF8574A (PDF)](https://www.nxp.com/docs/en/data-sheet/PCF8574_PCF8574A.pdf). Confirm the live 7-bit address with an ESP32 I²C scan (open pads often appear as **0x3F** on these clones, but board pull-up/down can differ).
+
+### Keypad (I²C 4×4)
+
+Full notes: **[docs/keypad-i2c.md](docs/keypad-i2c.md)**.
+
+| Item | Detail |
+|------|--------|
+| Kit | LONELY BINARY soft 4×4 membranes + **PCF8574** I²C adapters |
+| Host | **SDA/SCL** only (saves 6 GPIOs vs raw matrix) |
+| Voltage | **3.3–5 V** |
+| Address | Set A0–A2 so it **≠** LCD (often LCD at **0x3F**); confirm with bus scan |
+
+### 4-digit clock / countdown display
+
+Full notes: **[docs/seven-segment-display.md](docs/seven-segment-display.md)**.
+
+| Preferred ([B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71)) | Alternate ([B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV)) |
+|----------------------------------------------------------------|----------------------------------------------------------------|
+| **TM1637** module, clock colon, 0.56″, 5 colors in pack | Bare **5641BH** common-anode tube, red, **decimal points** |
+| **CLK + DIO** (not on I²C bus) | Needs external driver / multiplexing |
+| Listing: per-digit decimals **not** usable | More pins / driver complexity |
+
+### SSR + piezo
+
+See **[docs/peripherals.md](docs/peripherals.md)**. SSR-25DA: control **3–32 V DC**, load **24–380 V AC / 25 A** class; heat-sink for real ballast current; GPIO default **off**.
 
 ### Low-voltage power (5 V)
 

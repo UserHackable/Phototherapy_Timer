@@ -141,8 +141,9 @@ Cross-check with the table above; listing matches common WROOM mapping:
 
 | Peripheral | Suggested ESP32 pins | Notes |
 |------------|----------------------|--------|
-| I²C SDA | **GPIO21** | LCD1602 backpack, keypad I²C, 7-seg I²C |
+| I²C SDA | **GPIO21** | LCD1602 backpack + keypad I²C only |
 | I²C SCL | **GPIO22** | Shared bus @ ≤100 kHz for PCF8574 class |
+| TM1637 CLK / DIO | e.g. **GPIO18** / **GPIO23** | 7-seg clock module — **not** on I²C |
 | SSR (lamps) | **GPIO26** or **GPIO27** (pick one) | Digital out; **default LOW / off** at boot |
 | Piezo | **GPIO25** or **GPIO4** | Digital or LEDC PWM tone |
 | Spare UI / status LED | **GPIO2** only if no conflict with boot LED | Optional |
