@@ -128,9 +128,37 @@ Arduino IDE *could* target this board, but the preferred workflow is a **Unix te
 
 Exact SDK (ESP-IDF, PlatformIO CLI, etc.) is TBD; keep builds and flash steps runnable from the shell.
 
+## Firmware trees
+
+| Path | Role |
+|------|------|
+| [`docs/toolchain.md`](docs/toolchain.md) | Arduino under the hood, ESP-IDF, comparison, recommendations |
+| [`arduino_test_firmware/`](arduino_test_firmware/) | **mise + arduino-cli** bring-up sketches (optional) |
+| [`esp32_firmware/`](esp32_firmware/) | **ESP-IDF** product baseline (`idf.py`) |
+| [`conversation-with-grok.md`](conversation-with-grok.md) | Session notes / decision log |
+
+```bash
+# Shared firmware CLI
+./scripts/fw arduino setup
+./scripts/fw arduino upload blink      # or led_off, hello_serial, …
+./scripts/fw idf install               # once (large)
+./scripts/fw idf list
+./scripts/fw idf upload wifi_scan      # or blink; multi-app under esp32_firmware/apps/
+./scripts/fw idf monitor wifi_scan
+./scripts/fw port
+
+# Host helpers / Wi‑Fi secrets
+./scripts/export-known-wifi.sh         # known SSIDs → known_wifi.yaml (no passwords)
+cp secrets/wifi.yaml.example secrets/wifi.yaml   # edit passwords (gitignored)
+./scripts/fw idf nvs-wifi              # first network → device NVS
+./scripts/fw idf upload wifi_connect   # connect + DHCP + SNTP time
+```
+
+Wi‑Fi / NVS design: [docs/wifi-config.md](docs/wifi-config.md).
+
 ## Status
 
-Early stage — project scaffold only. Next work: capture and reimplement stock timer behavior; stand up ESP32 toolchain and bring-up of I/O.
+Early stage — hardware docs + dual toolchain scaffold. Next: flash hello on hardware; capture stock timer behavior; I/O bring-up.
 
 ## Remotes
 

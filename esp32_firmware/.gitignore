@@ -1,0 +1,6 @@
+# Per-app build trees and local sdkconfig (generated)
+apps/*/build/
+apps/*/sdkconfig
+apps/*/sdkconfig.old
+apps/*/dependencies.lock
+apps/*/managed_components/

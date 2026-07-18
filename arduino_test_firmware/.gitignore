@@ -1,0 +1,5 @@
+# Local build / compile dumps if created in-tree
+**/build/
+*.elf
+*.bin
+*.map

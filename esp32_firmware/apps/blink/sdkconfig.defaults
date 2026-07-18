@@ -1,0 +1,7 @@
+# Defaults for classic ESP32 (WROOM) DevKit-style boards.
+# Adjust flash size after esptool flash_id if needed.
+
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

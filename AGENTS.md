@@ -33,9 +33,13 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 
 ### Toolchain
 
-- Prefer **CLI + vim**, not Arduino IDE GUI: cross-compile + USB flash/serial.
-- Do not assume Arduino-only project layout until the user picks an SDK (ESP-IDF / PlatformIO / other).
-- Keep flash/build steps shell-scriptable when scaffolding.
+- Prefer **CLI + vim**, not Arduino IDE GUI. Full write-up: [docs/toolchain.md](docs/toolchain.md).
+- **Two tracks (both intentional):**
+  - [`arduino_test_firmware/`](arduino_test_firmware/) — multi-sketch (mise + arduino-cli).
+  - [`esp32_firmware/apps/`](esp32_firmware/apps/) — multi-app **ESP-IDF** (prefer for product logic).
+- **Single CLI:** [`scripts/fw`](scripts/fw) — `./scripts/fw arduino upload <sketch>`, `./scripts/fw idf upload <app>`. Do **not** add per-program scripts.
+- Do not commit ESP-IDF clones or `~/.arduino15` cores.
+- Session decision log: [conversation-with-grok.md](conversation-with-grok.md).
 
 ### Safety (hardware)
 
@@ -75,6 +79,7 @@ Never force-push `master` unless the user explicitly asks.
 - This controls **UV phototherapy** hardware. Prefer fail-safe defaults (timers that stop, hard max exposure limits, clear off/error states) over silent recovery.
 - Do not invent medical dosing guidance; treat session times and limits as user-configured parameters with safe bounds, not clinical prescriptions.
 - Never commit secrets, credentials, or private patient/session data.
+- Wi‑Fi: real passwords only in `secrets/wifi.yaml` (gitignored). Provision device with `./scripts/fw idf nvs-wifi` (NVS namespace `wifi`). `wifi_connect` reads NVS, not committed secrets. Do not commit `secrets/generated/`, `*.generated.h`, `apps/*/build/`, or secret-bearing `*.bin`. See [docs/wifi-config.md](docs/wifi-config.md).
 
 ## Style
 

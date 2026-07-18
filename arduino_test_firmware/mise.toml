@@ -1,0 +1,5 @@
+# Arduino CLI for bring-up sketches (not the Arduino IDE GUI).
+# From this directory:  mise install && mise exec -- arduino-cli version
+
+[tools]
+arduino-cli = "1.5.1"

@@ -1,0 +1,29 @@
+# --- Secrets (never commit) -------------------------------------------------
+# Host Wi‑Fi inventory (SSIDs only)
+known_wifi.yaml
+
+# Local credentials with passwords
+secrets/**
+!secrets/README.md
+!secrets/*.example
+!secrets/*.example.*
+
+# Generated sources / NVS blobs that may embed passphrases
+**/wifi_credentials.generated.h
+secrets/generated/
+*.nvs.bin
+
+# --- Build / flash artifacts (may embed secrets if built with them) ---------
+esp32_firmware/apps/*/build/
+esp32_firmware/apps/*/sdkconfig
+esp32_firmware/apps/*/sdkconfig.old
+esp32_firmware/apps/*/dependencies.lock
+esp32_firmware/apps/*/managed_components/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Editor / OS junk
+*~
+.DS_Store

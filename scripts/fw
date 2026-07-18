@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# Reusable firmware CLI for Phototherapy_Timer.
+#
+# Arduino (multi-sketch under arduino_test_firmware/):
+#   ./scripts/fw arduino list
+#   ./scripts/fw arduino setup
+#   ./scripts/fw arduino build  [sketch]
+#   ./scripts/fw arduino upload [sketch]
+#   ./scripts/fw arduino monitor
+#
+# ESP-IDF (multi-app under esp32_firmware/apps/):
+#   ./scripts/fw idf list
+#   ./scripts/fw idf install
+#   ./scripts/fw idf build  <app>
+#   ./scripts/fw idf flash  <app>
+#   ./scripts/fw idf upload <app>     # build + flash
+#   ./scripts/fw idf monitor <app>
+#   ./scripts/fw idf nvs-wifi         # provision secrets/wifi.yaml → NVS
+#
+#   ./scripts/fw port
+#
+# Examples:
+#   ./scripts/fw arduino upload blink
+#   ./scripts/fw idf nvs-wifi
+#   ./scripts/fw idf upload wifi_connect
+#   ./scripts/fw idf monitor wifi_connect
+
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+ARDUINO_ROOT="$REPO/arduino_test_firmware"
+IDF_ROOT="$REPO/esp32_firmware"
+IDF_APPS="$IDF_ROOT/apps"
+
+usage() {
+  sed -n '2,30p' "$0" | sed 's/^# \?//'
+  exit "${1:-0}"
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# --- Arduino ------------------------------------------------------------------
+
+arduino_list_sketches() {
+  local d name
+  shopt -s nullglob
+  for d in "$ARDUINO_ROOT"/*/; do
+    name=$(basename "$d")
+    [[ -f "$d/${name}.ino" ]] && printf '%s\n' "$name"
+  done
+  shopt -u nullglob
+}
+
+arduino_resolve_sketch() {
+  local sketch="${1:-${SKETCH:-blink}}"
+  if [[ ! -f "$ARDUINO_ROOT/${sketch}/${sketch}.ino" ]]; then
+    echo "error: unknown sketch '$sketch'" >&2
+    echo "available:" >&2
+    arduino_list_sketches | sed 's/^/  /' >&2
+    exit 1
+  fi
+  printf '%s\n' "$sketch"
+}
+
+arduino_cli() {
+  (cd "$ARDUINO_ROOT" && mise exec -- arduino-cli "$@")
+}
+
+arduino_port() {
+  if [[ -n "${PORT:-}" ]]; then
+    printf '%s\n' "$PORT"
+  else
+    "$REPO/scripts/detect-esp-port.sh"
+  fi
+}
+
+cmd_arduino() {
+  local sub="${1:-}"
+  shift || true
+  local fqbn="${FQBN:-esp32:esp32:esp32}"
+  local sketch port
+
+  case "$sub" in
+    ""|-h|--help) usage ;;
+    list|ls) arduino_list_sketches ;;
+    setup) "$ARDUINO_ROOT/scripts/setup.sh" ;;
+    build|compile)
+      sketch=$(arduino_resolve_sketch "${1:-}")
+      echo "compile  sketch=$sketch  fqbn=$fqbn"
+      arduino_cli compile -b "$fqbn" "$ARDUINO_ROOT/$sketch"
+      echo "OK: compiled $sketch"
+      ;;
+    upload|flash)
+      sketch=$(arduino_resolve_sketch "${1:-}")
+      port=$(arduino_port)
+      echo "upload   sketch=$sketch  port=$port  fqbn=$fqbn"
+      arduino_cli compile -b "$fqbn" "$ARDUINO_ROOT/$sketch"
+      arduino_cli upload -p "$port" -b "$fqbn" "$ARDUINO_ROOT/$sketch"
+      echo "OK: uploaded $sketch -> $port"
+      ;;
+    monitor|serial)
+      port=$(arduino_port)
+      local baud="${BAUD:-115200}"
+      echo "monitor  port=$port  baud=$baud"
+      arduino_cli monitor -p "$port" -c "baudrate=${baud}"
+      ;;
+    *) die "unknown arduino subcommand: $sub" ;;
+  esac
+}
+
+# --- ESP-IDF ------------------------------------------------------------------
+
+idf_list_apps() {
+  local d name
+  shopt -s nullglob
+  for d in "$IDF_APPS"/*/; do
+    name=$(basename "$d")
+    [[ -f "$d/CMakeLists.txt" ]] && printf '%s\n' "$name"
+  done
+  shopt -u nullglob
+}
+
+idf_resolve_app() {
+  local app="${1:-${APP:-}}"
+  if [[ -z "$app" ]]; then
+    echo "error: idf app name required" >&2
+    echo "available:" >&2
+    idf_list_apps | sed 's/^/  /' >&2
+    exit 1
+  fi
+  if [[ ! -f "$IDF_APPS/$app/CMakeLists.txt" ]]; then
+    echo "error: unknown app '$app'" >&2
+    echo "available:" >&2
+    idf_list_apps | sed 's/^/  /' >&2
+    exit 1
+  fi
+  printf '%s\n' "$app"
+}
+
+cmd_idf() {
+  local sub="${1:-}"
+  shift || true
+  local app
+
+  case "$sub" in
+    ""|-h|--help) usage ;;
+    list|ls) idf_list_apps ;;
+    install) "$IDF_ROOT/scripts/install-idf.sh" ;;
+    build|compile)
+      app=$(idf_resolve_app "${1:-}")
+      APP="$app" "$IDF_ROOT/scripts/build.sh" "$app"
+      ;;
+    flash)
+      app=$(idf_resolve_app "${1:-}")
+      APP="$app" "$IDF_ROOT/scripts/flash.sh" "$app"
+      ;;
+    upload|run)
+      app=$(idf_resolve_app "${1:-}")
+      APP="$app" "$IDF_ROOT/scripts/build.sh" "$app"
+      APP="$app" "$IDF_ROOT/scripts/flash.sh" "$app"
+      echo "OK: idf app=$app build+flash done"
+      ;;
+    monitor|serial)
+      app=$(idf_resolve_app "${1:-}")
+      APP="$app" "$IDF_ROOT/scripts/monitor.sh" "$app"
+      ;;
+    nvs-wifi|provision-wifi)
+      "$REPO/scripts/nvs-wifi-provision.sh" "$@"
+      ;;
+    *) die "unknown idf subcommand: $sub (list install build flash upload monitor nvs-wifi)" ;;
+  esac
+}
+
+# --- main ---------------------------------------------------------------------
+
+tool="${1:-}"
+shift || true
+
+case "$tool" in
+  ""|-h|--help) usage ;;
+  arduino|ard) cmd_arduino "$@" ;;
+  idf|esp-idf|native) cmd_idf "$@" ;;
+  port|detect-port) "$REPO/scripts/detect-esp-port.sh" "$@" ;;
+  *) die "unknown tool: $tool (try: arduino | idf | port)" ;;
+esac

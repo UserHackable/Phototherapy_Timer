@@ -163,17 +163,25 @@ Finalize after measuring boot levels and any onboard LED; update this table when
 
 ## Programming (CLI)
 
-1. Install USB-UART driver if needed (`ch341` / `cp210x`).
-2. Port typically `/dev/ttyUSB0` or `/dev/ttyACM0`.
-3. Download mode: hold **BOOT**, tap **EN**, release **BOOT** (many boards auto-reset via DTR/RTS).
-4. Tools: `esptool.py` (flash), serial monitor at **115200** (common default; confirm with firmware).
-5. Prefer **ESP-IDF** or **PlatformIO CLI** over Arduino IDE GUI (project preference).
+1. Install USB-UART driver if needed (`ch341` / `cp210x`). **This kit’s board:** Silicon Labs **CP2102** (`10c4:ea60`).
+2. Serial port: do **not** hard-code `ttyUSB0`. Use the project scanner:
+   ```bash
+   ./scripts/detect-esp-port.sh --verbose
+   # example result: /dev/ttyUSB0
+   # stable symlink: /dev/serial/by-id/usb-Silicon_Labs_CP2102_…-port0
+   ```
+   Flash/monitor scripts call this automatically unless `PORT` is set.
+3. Linux access: user in **`uucp`** (Arch) or **`dialout`** (Debian/Ubuntu); re-login after `usermod`.
+4. Download mode: hold **BOOT**, tap **EN**, release **BOOT** (many boards auto-reset via DTR/RTS).
+5. Upload tool under both Arduino and IDF: **esptool**; serial often **115200**.
+6. Project trees: [arduino_test_firmware/](../arduino_test_firmware/) and [esp32_firmware/](../esp32_firmware/). Overview: [toolchain.md](toolchain.md).
 
-Example identity check (after toolchain install):
+Example identity check (after toolchain install; binary may be `esptool` or `esptool.py`):
 
 ```bash
-esptool.py --port /dev/ttyUSB0 chip_id
-esptool.py --port /dev/ttyUSB0 flash_id
+PORT=$(./scripts/detect-esp-port.sh)
+esptool.py --port "$PORT" chip_id
+esptool.py --port "$PORT" flash_id
 ```
 
 ## Open confirmations (on the unit in hand)

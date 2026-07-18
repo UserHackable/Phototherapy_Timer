@@ -1,0 +1,5 @@
+# Phototherapy_Timer — ESP-IDF app: blink
+cmake_minimum_required(VERSION 3.16)
+
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(blink)
