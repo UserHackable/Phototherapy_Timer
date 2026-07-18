@@ -36,7 +36,7 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 
 | Role | Choice | Notes / link |
 |------|--------|----------------|
-| MCU | **ESP32** on a breakout board | Wi‑Fi + Bluetooth; USB for programming. [Amazon B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X) |
+| MCU | **ESP32** Type-C **38-pin narrow** + screw terminal breakout | Wi‑Fi + BT; DevKitC-style pinout. Details: [docs/esp32-board.md](docs/esp32-board.md). [Amazon B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X) |
 | Lamp drive | Solid-state relay (SSR) | One GPIO like an LED; switches mains AC to the fluorescent **ballasts**. [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
 | Input | 16-key **4×4 keypad** + I²C driver | Fast numeric entry plus spare keys for functions. [Amazon B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX) |
 | UI text | I²C **LCD1602** (16×2), blue backlight | **HD44780** + backpack **PCF8574AT** (A-variant); **5 V DC**. See [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md). [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
@@ -46,6 +46,23 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 **I²C bus (shared):** keypad driver, 16×2 LCD, and 7-segment module (addresses TBD once boards are on the bus; scan to confirm).
 
 **GPIO (simple):** SSR enable, piezo; plus any board-level enable/reset lines as needed.
+
+### ESP32 board (MCU)
+
+Full pinout, power, programming notes, and product photos: **[docs/esp32-board.md](docs/esp32-board.md)**.
+
+| Item | Detail |
+|------|--------|
+| Listing | DORHEA 3-pack: Type-C **38-pin narrow** ESP32 + **GPIO 1→2** screw terminal adapters |
+| Module | ESP-WROOM-32 class; shield text **ESP-32**, FCC **2AB7T-ESP32-32X** |
+| CPU / radio | Dual-core LX6 ≤240 MHz; Wi‑Fi + Bluetooth Classic/BLE |
+| USB | Type-C; on-board USB-UART bridge (CH340 / CP210x — check IC on board) |
+| Pin map | Matches Espressif **ESP32-DevKitC** 38-pin headers (verified vs adapter silk) |
+| Default I²C | **SDA GPIO21**, **SCL GPIO22** |
+| Avoid | GPIO 6–11 (flash); treat 0/2/12/15 as strapping; 34–39 input-only |
+| Manuals | [DevKitC user guide](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32/esp32-devkitc/user_guide.html) · [WROOM-32 datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-wroom-32_datasheet_en.pdf) |
+
+Breakout fits **this** 38-pin narrow form factor only — not classic DevKit V1.
 
 ### LCD1602 text display (I²C backpack)
 

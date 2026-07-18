@@ -23,7 +23,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 
 | Role | Part |
 |------|------|
-| MCU | ESP32 breakout ([B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X)) — Wi‑Fi + BT for later smart management / logging |
+| MCU | ESP32 Type-C **38-pin narrow** + screw terminals ([B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X)) — DevKitC pinout; docs: [docs/esp32-board.md](docs/esp32-board.md); default I²C **SDA=21 SCL=22** |
 | Lamps | SSR ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — GPIO → AC ballasts; **mains hazard** |
 | Input | 4×4 keypad + I²C ([B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX)) |
 | Text UI | I²C LCD1602 16×2, blue backlight — HD44780 + **PCF8574AT** (A-variant) backpack, 5 V; docs: [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md); expect I²C **0x38–0x3F** (often **0x3F** with open A0–A2) ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
