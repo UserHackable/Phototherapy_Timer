@@ -26,7 +26,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 | MCU | ESP32 breakout ([B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X)) — Wi‑Fi + BT for later smart management / logging |
 | Lamps | SSR ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — GPIO → AC ballasts; **mains hazard** |
 | Input | 4×4 keypad + I²C ([B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX)) |
-| Text UI | I²C 16×2 LCD ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
+| Text UI | I²C LCD1602 16×2, blue backlight — HD44780 + **PCF8574AT** (A-variant) backpack, 5 V; docs: [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md); expect I²C **0x38–0x3F** (often **0x3F** with open A0–A2) ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
 | Clock / countdown | Prefer I²C 4-digit 7-seg clock module ([B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71)); alt with DPs ([B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV)) |
 | Beep | Piezo on one GPIO |
 | Logic power | **5 V USB wall charger** (not the stock timer’s internal AC→DC). Internal **2-prong receptacle** from a short cannibalized extension cord; charger plugs in there. Lamps remain mains via SSR. |

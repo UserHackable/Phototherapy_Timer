@@ -39,13 +39,31 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 | MCU | **ESP32** on a breakout board | Wi‑Fi + Bluetooth; USB for programming. [Amazon B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X) |
 | Lamp drive | Solid-state relay (SSR) | One GPIO like an LED; switches mains AC to the fluorescent **ballasts**. [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
 | Input | 16-key **4×4 keypad** + I²C driver | Fast numeric entry plus spare keys for functions. [Amazon B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX) |
-| UI text | I²C **16×2** character LCD | Prompts and feedback. [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
+| UI text | I²C **LCD1602** (16×2), blue backlight | **HD44780** + backpack **PCF8574AT** (A-variant); **5 V DC**. See [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md). [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
 | Time / countdown | I²C **4-digit 7-segment** (clock-style) | Preferred: [B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71) (I²C, clock layout). Alternate: [B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV) (decimal-point dots). Idle → wall clock; therapy → exposure / countdown. |
 | Audio | Piezo buzzer | Stock-style beeper; single GPIO. |
 
-**I²C bus (shared):** keypad driver, 16×2 LCD, and 7-segment module (addresses TBD once boards are on the bus).
+**I²C bus (shared):** keypad driver, 16×2 LCD, and 7-segment module (addresses TBD once boards are on the bus; scan to confirm).
 
 **GPIO (simple):** SSR enable, piezo; plus any board-level enable/reset lines as needed.
+
+### LCD1602 text display (I²C backpack)
+
+Photo and full I²C notes: **[docs/lcd1602-i2c.md](docs/lcd1602-i2c.md)** · image: [docs/images/lcd1602-i2c-backpack.jpg](docs/images/lcd1602-i2c-backpack.jpg)
+
+From the module photo and NXP datasheet:
+
+| Detail | Value |
+|--------|--------|
+| Chip | **PCF8574AT** (Philips / NXP marking; topside includes `L21491` / `05` / `knM02143`) |
+| Module | HW-061-style backpack; header **GND · VCC · SDA · SCL** |
+| Address pads | **A0 · A1 · A2** open as shipped (solder to change address) |
+| I²C class | Standard-mode, **100 kHz** max (datasheet); 8-bit port expander |
+| Supply | Chip 2.5–6 V; module run at **5 V** |
+| **A-variant address range** | 7-bit **0x38–0x3F** (all address bits HIGH → **0x3F**) |
+| Non‑A range (for contrast) | PCF8574 / PCF8574T → **0x20–0x27** (all HIGH → **0x27**) — *not* this chip |
+
+**Manual:** use the NXP product data sheet — [PCF8574; PCF8574A (PDF)](https://www.nxp.com/docs/en/data-sheet/PCF8574_PCF8574A.pdf). Confirm the live 7-bit address with an ESP32 I²C scan (open pads often appear as **0x3F** on these clones, but board pull-up/down can differ).
 
 ### Low-voltage power (5 V)
 
