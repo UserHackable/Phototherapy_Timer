@@ -139,16 +139,14 @@ Cross-check with the table above; listing matches common WROOM mapping:
 
 ### Suggested pins for *this* project (provisional)
 
-| Peripheral | Suggested ESP32 pins | Notes |
-|------------|----------------------|--------|
-| I²C SDA | **GPIO21** | LCD1602 backpack + keypad I²C only |
+| Peripheral | ESP32 pin | Notes |
+|------------|-----------|--------|
+| I²C SDA | **GPIO21** | LCD1602 backpack + keypad I²C |
 | I²C SCL | **GPIO22** | Shared bus @ ≤100 kHz for PCF8574 class |
-| TM1637 CLK / DIO | e.g. **GPIO18** / **GPIO23** | 7-seg clock module — **not** on I²C |
-| SSR (lamps) | **GPIO26** or **GPIO27** (pick one) | Digital out; **default LOW / off** at boot |
-| Piezo | **GPIO25** or **GPIO4** | Digital or LEDC PWM tone |
-| Spare UI / status LED | **GPIO2** only if no conflict with boot LED | Optional |
-
-Finalize after measuring boot levels and any onboard LED; update this table when wired.
+| TM1637 CLK / DIO | **GPIO18** / **GPIO23** | 7-seg clock module — **not** on I²C |
+| SSR (lamps) | **GPIO26** | Active high; **default LOW / fail-off** |
+| Piezo | **GPIO25** | LEDC tone; end-of-session beep |
+| Status / lamp mirror LED | **GPIO2** | Onboard blue; ON whenever SSR is ON |
 
 ## Power
 

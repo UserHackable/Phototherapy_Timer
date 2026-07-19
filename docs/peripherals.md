@@ -29,11 +29,11 @@ Product: [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) — BlueStars
 - Size conductors and fusing for ballast inrush and continuous current; 25 A is an upper rating, not a target load.
 - Keep **control wiring** isolated from **load wiring**; use the metal base / mounting carefully (often tied to heatsink / chassis considerations).
 
-### Suggested GPIO
+### GPIO (locked)
 
-| Role | Provisional pin |
-|------|-----------------|
-| SSR enable | **GPIO26** or **GPIO27** (see [esp32-board.md](esp32-board.md)) |
+| Role | Pin |
+|------|-----|
+| SSR enable | **GPIO26** (active high; default LOW / fail-off) |
 
 ## Piezo buzzer
 
@@ -46,22 +46,21 @@ Stock unit used a piezo beeper. Project plan: same idea — **one GPIO**.
 | Passive | Square wave / LEDC PWM for tone; active type: DC on/off |
 | Use | Session start/end, key click, error chirp |
 
-### Suggested GPIO
+### GPIO (locked)
 
-| Role | Provisional pin |
-|------|-----------------|
-| Buzzer | **GPIO25** or **GPIO4** |
+| Role | Pin |
+|------|-----|
+| Piezo | **GPIO25** (LEDC tone; brief beep at end of session) |
 
 No specific Amazon ASIN locked yet for the buzzer; document part number when purchased.
 
-## Provisional pin budget (summary)
+## Pin budget (locked for this bench)
 
 | Function | Interface | Pins |
 |----------|-----------|------|
-| LCD1602 | I²C (PCF8574AT) | SDA **21**, SCL **22** |
-| Keypad | I²C (PCF8574) | shared SDA/SCL |
-| TM1637 7-seg | CLK + DIO | two free GPIOs (e.g. 18 + 23) |
-| SSR | GPIO | e.g. **26** |
-| Piezo | GPIO | e.g. **25** |
-
-Update this table when wiring is finalized.
+| LCD1602 | I²C (PCF8574) | SDA **21**, SCL **22** |
+| Keypad | I²C (PCF8574) | shared SDA/SCL (**0x20**) |
+| TM1637 7-seg | CLK + DIO | **18** / **23** |
+| SSR (lamps) | GPIO | **26** |
+| Piezo | GPIO | **25** |
+| Status / lamp mirror LED | GPIO | **2** (onboard blue; ON with SSR) |

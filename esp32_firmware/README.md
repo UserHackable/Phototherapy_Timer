@@ -39,6 +39,7 @@ PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 | `blink` | GPIO 2 LED, 250 ms on/off |
 | `i2c_scan` | Probe I²C on SDA=21 / SCL=22; print addresses that ACK |
 | `keypad_hello` | 4×4 I²C keypad @ **0x20**; show presses on LCD + UART |
+| `session_timer` | Timer + idle wall clock; SSR **26**/LED **2**; piezo **25**; NVS Wi‑Fi — [Gherkin](../docs/features/session_timer.feature) |
 | `lcd_hello` | “Hello, world!” on LCD1602 via PCF8574 backpack |
 | `net_clock` | LCD progress + TM1637 HH:MM + NVS Wi‑Fi + DHCP + SNTP |
 | `tm1637_hello` | TM1637 4-digit bring-up (CLK=18, DIO=23); 88:88 → 12:34 → MM:SS |
