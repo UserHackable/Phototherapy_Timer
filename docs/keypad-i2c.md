@@ -38,10 +38,15 @@ Same rules as [PCF8574 / PCF8574A](https://www.nxp.com/docs/en/data-sheet/PCF857
 1. I²C bus scan after wiring.
 2. Solder A0/A1/A2 on the keypad adapter so it is **not** 0x3F (e.g. target **0x20** / **0x27** if the adapter is non‑A, or a free slot in 0x38–0x3E if A-variant).
 
-Record the confirmed address here once known:
+Recorded on this bench (`i2c_scan`, SDA=21 SCL=22):
 
-- [ ] Keypad adapter 7-bit address: `0x__`
-- [ ] Chip topside marking (PCF8574 vs PCF8574A): ________
+| Device | 7-bit address | Notes |
+|--------|---------------|--------|
+| **Keypad** adapter | **0x20** | Non‑A PCF8574 range (A0–A2 look LOW / open-as-low) |
+| **LCD** backpack | **0x27** | See [lcd1602-i2c.md](lcd1602-i2c.md) |
+
+- [x] Keypad adapter 7-bit address: `0x20`
+- [ ] Chip topside marking (PCF8574 vs PCF8574A): ________ (behavior matches non‑A)
 
 ## Key layout (typical 4×4 membrane)
 
@@ -60,12 +65,14 @@ Matrix wiring on the 8-pin ribbon is row/column order; the PCF8574 port bits map
 
 ## Project wiring (provisional)
 
-| Signal | ESP32 (default) | Notes |
-|--------|-----------------|--------|
-| SDA | **GPIO21** | Shared with LCD1602 backpack |
-| SCL | **GPIO22** | Shared bus |
-| VCC | 3.3 V or 5 V | Prefer same rail as other I²C modules; 5 V OK if level-safe |
-| GND | GND | Common |
+| Signal | ESP32 (default) | Bench jumper (this build) | Notes |
+|--------|-----------------|---------------------------|--------|
+| SDA | **GPIO21** | **Orange** | Shared with LCD1602 backpack |
+| SCL | **GPIO22** | **Yellow** | Shared bus |
+| VCC | 3.3 V or 5 V | (as wired) | Prefer same rail as other I²C modules; 5 V OK if level-safe |
+| GND | GND | (as wired) | Common |
+
+Wire colors are for this bench harness only — always prefer pin numbers if colors change.
 
 ## Firmware notes
 
@@ -73,6 +80,17 @@ Matrix wiring on the 8-pin ribbon is row/column order; the PCF8574 port bits map
 2. Poll keypad on a timer (e.g. 10–20 ms) or on interrupt if INT pin is brought out (many cheap adapters leave INT unused).
 3. Debounce in software; ignore multi-key until single-key UX is solid.
 4. Fail-safe: keypad faults must **not** leave the SSR on.
+
+### Bring-up app
+
+[`esp32_firmware/apps/keypad_hello`](../esp32_firmware/apps/keypad_hello) — matrix scan on **0x20**, LCD shows `Key: X` / `Count: N`, UART logs presses.
+
+```bash
+./scripts/fw idf upload keypad_hello
+./scripts/fw idf monitor keypad_hello
+```
+
+Expander scan (**verified** on this bench, full pad match): drive **P0–P3**, read **P4–P7**. Silk labels map as `KEYMAP[3-col][3-row]` (matrix transposed + both axes reversed).
 
 ## Manuals
 
