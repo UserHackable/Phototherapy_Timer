@@ -1,15 +1,20 @@
 /*
  * ESP-IDF app: net_clock
  *
- * LCD1602 progress UI + Wi‑Fi (NVS) + DHCP + SNTP wall clock.
+ * LCD1602 progress UI + TM1637 HH:MM + Wi‑Fi (NVS) + DHCP + SNTP.
  *
  * Boot sequence:
- *   1. Init LCD, show Hello world
+ *   1. Init LCD + TM1637; Hello world on LCD
  *   2. Load Wi‑Fi credentials from NVS, connect, show DHCP info
- *   3. Sync time via SNTP, then display date + time
+ *   3. Sync time via SNTP
+ *   4. LCD = date + 12h AM/PM with seconds; 7-seg = HH:MM (colon blink)
  *
- * Progress messages stay on screen ~1 s so they are readable.
+ * Progress messages stay on LCD ~1 s so they are readable.
  * Serial (UART) logs the same steps (password never logged).
+ *
+ * Wiring:
+ *   LCD I²C  SDA=21 SCL=22  VCC=5V
+ *   TM1637   CLK=18 DIO=23  VCC=5V
  *
  *   ./scripts/fw idf nvs-wifi
  *   ./scripts/fw idf upload net_clock
@@ -34,11 +39,15 @@
 #include "lcd1602_pcf8574.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "tm1637.h"
 
 static const char *TAG = "net_clock";
 
 #define I2C_SDA_GPIO 21
 #define I2C_SCL_GPIO 22
+
+#define TM_CLK_GPIO 18
+#define TM_DIO_GPIO 23
 
 #define NVS_NS_WIFI "wifi"
 #define NVS_KEY_SSID "ssid"
@@ -67,6 +76,9 @@ static char s_ssid[33];
 static lcd1602_t s_lcd;
 static bool s_lcd_ok;
 
+static tm1637_t s_tm;
+static bool s_tm_ok;
+
 /** Show two LCD lines and log them; hold so the user can read. */
 static void announce(const char *line0, const char *line1)
 {
@@ -78,6 +90,30 @@ static void announce(const char *line0, const char *line1)
         lcd1602_print_line(&s_lcd, 1, l1);
     }
     vTaskDelay(pdMS_TO_TICKS(MSG_HOLD_MS));
+}
+
+/** 12-hour hour for 7-seg (1–12). */
+static int hour_12(int hour24)
+{
+    int h = hour24 % 12;
+    return h == 0 ? 12 : h;
+}
+
+/** Update TM1637 with HH:MM; colon on even seconds. */
+static void led_show_hhmm(const struct tm *t, bool time_valid)
+{
+    if (!s_tm_ok) {
+        return;
+    }
+    if (!time_valid) {
+        /* Dashes-ish: blank pairs with colon so user sees LED is alive */
+        tm1637_show_pairs(&s_tm, 0, 0, true);
+        return;
+    }
+    int hh = hour_12(t->tm_hour);
+    int mm = t->tm_min;
+    bool colon = (t->tm_sec % 2) == 0;
+    tm1637_show_pairs(&s_tm, hh, mm, colon);
 }
 
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -168,7 +204,6 @@ static void wifi_start_sta(const char *ssid, const char *pass)
 
 static bool wait_for_ip(void)
 {
-    /* Poll so we can refresh the LCD while waiting */
     const int step_ms = 1000;
     int waited = 0;
     while (waited < WIFI_IP_WAIT_MS) {
@@ -258,12 +293,15 @@ static void display_clock_once(void)
 
     char date_buf[17];
     char time_buf[17];
+    bool valid = timeinfo.tm_year >= (2020 - 1900);
 
-    if (timeinfo.tm_year >= (2020 - 1900)) {
+    if (valid) {
         strftime(date_buf, sizeof(date_buf), "%Y-%m-%d %a", &timeinfo);
-        /* 12-hour clock; fits 16 cols e.g. "03:32:05 PM" */
         strftime(time_buf, sizeof(time_buf), "%I:%M:%S %p", &timeinfo);
-        ESP_LOGI(TAG, "clock %s %s%s", date_buf, time_buf, s_have_ip ? "" : " (offline)");
+        ESP_LOGI(TAG, "clock %s %s  LED %02d:%02d%s",
+                 date_buf, time_buf,
+                 hour_12(timeinfo.tm_hour), timeinfo.tm_min,
+                 s_have_ip ? "" : " (offline)");
     } else {
         snprintf(date_buf, sizeof(date_buf), "Time unset");
         snprintf(time_buf, sizeof(time_buf), "wait SNTP");
@@ -274,6 +312,7 @@ static void display_clock_once(void)
         lcd1602_print_line(&s_lcd, 0, date_buf);
         lcd1602_print_line(&s_lcd, 1, time_buf);
     }
+    led_show_hhmm(&timeinfo, valid);
 }
 
 static bool six_hours_elapsed(void)
@@ -316,13 +355,31 @@ static bool init_lcd(void)
     return true;
 }
 
+static bool init_tm1637(void)
+{
+    ESP_LOGI(TAG, "init TM1637 CLK=%d DIO=%d", TM_CLK_GPIO, TM_DIO_GPIO);
+    if (tm1637_init(&s_tm, TM_CLK_GPIO, TM_DIO_GPIO) != ESP_OK) {
+        ESP_LOGE(TAG, "TM1637 init failed");
+        return false;
+    }
+    tm1637_set_brightness(&s_tm, 5);
+    /* Bring-up pattern until SNTP fills real time */
+    tm1637_show_pairs(&s_tm, 88, 88, true);
+    s_tm_ok = true;
+    ESP_LOGI(TAG, "TM1637 ready");
+    return true;
+}
+
 void app_main(void)
 {
-    ESP_LOGI(TAG, "net_clock starting");
+    ESP_LOGI(TAG, "net_clock starting (LCD + TM1637)");
 
-    /* --- 1. Display first --- */
+    /* --- 1. Displays first --- */
     if (!init_lcd()) {
         ESP_LOGW(TAG, "continuing without LCD (serial only)");
+    }
+    if (!init_tm1637()) {
+        ESP_LOGW(TAG, "continuing without TM1637");
     }
 
     announce("Hello, world!", "ESP32 LCD1602");
@@ -351,7 +408,6 @@ void app_main(void)
 
     strncpy(s_ssid, ssid, sizeof(s_ssid) - 1);
 
-    /* SSID may be longer than 16 cols — show truncated */
     {
         char ssid_line[17];
         snprintf(ssid_line, sizeof(ssid_line), "%.16s", ssid);
@@ -389,9 +445,9 @@ void app_main(void)
         announce("Time synced", "Network OK");
     }
 
-    ESP_LOGI(TAG, "online — LCD clock 1 s; SNTP every 6 h and on reconnect");
+    ESP_LOGI(TAG, "online — LCD date/AM-PM; LED HH:MM; SNTP every 6 h");
 
-    /* --- 5. Live clock --- */
+    /* --- 5. Live dual clock --- */
     while (1) {
         display_clock_once();
 

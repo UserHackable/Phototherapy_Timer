@@ -39,7 +39,8 @@ PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 | `blink` | GPIO 2 LED, 250 ms on/off |
 | `i2c_scan` | Probe I²C on SDA=21 / SCL=22; print addresses that ACK |
 | `lcd_hello` | “Hello, world!” on LCD1602 via PCF8574 backpack |
-| `net_clock` | LCD progress UI + NVS Wi‑Fi + DHCP + SNTP date/time clock |
+| `net_clock` | LCD progress + TM1637 HH:MM + NVS Wi‑Fi + DHCP + SNTP |
+| `tm1637_hello` | TM1637 4-digit bring-up (CLK=18, DIO=23); 88:88 → 12:34 → MM:SS |
 | `wifi_scan` | STA scan; print APs (no secrets) |
 | `wifi_connect` | NVS Wi‑Fi + DHCP + SNTP on UART (credentials via `nvs-wifi`) |
 
@@ -61,7 +62,14 @@ cp secrets/wifi.yaml.example secrets/wifi.yaml   # once; one ssid + password
 
 ## net_clock
 
-LCD-first: Hello world → Wi‑Fi/DHCP steps on the 16×2 → SNTP → live date/time. Same NVS credentials as `wifi_connect`. Progress screens hold ~1 s; clock refreshes every second; SNTP every 6 h and on reconnect.
+LCD-first: Hello world → Wi‑Fi/DHCP steps on the 16×2 → SNTP → live clocks. Same NVS credentials as `wifi_connect`.
+
+| Display | Shows |
+|---------|--------|
+| LCD1602 | Date + 12h time with seconds (`06:17:37 PM`) |
+| TM1637 | **HH:MM** (12h), colon blinks each second |
+
+Progress screens hold ~1 s; clocks refresh every second; SNTP every 6 h and on reconnect. Pins: LCD SDA/SCL 21/22; TM1637 CLK/DIO 18/23.
 
 ```bash
 ./scripts/fw idf nvs-wifi

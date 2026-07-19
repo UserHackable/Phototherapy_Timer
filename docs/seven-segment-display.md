@@ -54,9 +54,15 @@ Timebase can come from ESP32 (SNTP over Wi‑Fi later, or RTC / free-running clo
 
 ### Firmware
 
-- Use a **TM1637** driver (ESP-IDF component or port of common Arduino `TM1637Display` logic).
-- Brightness is controllable via TM1637 commands.
+- Bring-up app: [`esp32_firmware/apps/tm1637_hello`](../esp32_firmware/apps/tm1637_hello) — bit-bang driver, patterns `88:88` / `12:34`, then free-running **MM:SS** with blinking colon.
+- Defaults: **CLK=GPIO18**, **DIO=GPIO23** (change in `main.c` if wired differently).
+- Brightness is controllable via TM1637 display-control command (0–7).
 - Datasheet / app notes: search **“TM1637 datasheet”** (Titan Micro; many community PDFs). Protocol is bit-banged CLK/DIO, not standard I²C ACK framing.
+
+```bash
+./scripts/fw idf upload tm1637_hello
+./scripts/fw idf monitor tm1637_hello
+```
 
 ### Manuals
 
