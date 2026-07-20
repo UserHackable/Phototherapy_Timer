@@ -1,0 +1,1 @@
+sudo pacman -S kicad kicad-library kicad-library-3d kicad-demos

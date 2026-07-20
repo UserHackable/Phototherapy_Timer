@@ -63,6 +63,10 @@ Use **0–9** for session duration / PIN-style entry; **A–D**, `*`, `#` for St
 
 Matrix wiring on the 8-pin ribbon is row/column order; the PCF8574 port bits map to those lines (library-dependent). Confirm with a scan-and-print bring-up sketch before hard-coding bit maps.
 
+## Mechanical (panel)
+
+Soft membrane: adhesive face mount, **no screw footprint**. **Measured on this unit:** **2 11/16″** wide × (**3″ − 1/32″**) tall ≈ **68.3 × 75.4–76 mm**. I²C adapter stays behind the plate. Full notes: **[front-panel.md](front-panel.md)**.
+
 ## Project wiring (provisional)
 
 | Signal | ESP32 (default) | Bench jumper (this build) | Notes |

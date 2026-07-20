@@ -42,6 +42,7 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 | UI text | I²C **LCD1602** (16×2), blue backlight | **HD44780** + backpack **PCF8574AT** (A-variant); **5 V DC**. See [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md). [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
 | Time / countdown | **TM1637** 4-digit clock module (preferred) | **Not I²C** — **CLK + DIO** only; colon layout; DPs not usable. Docs: [docs/seven-segment-display.md](docs/seven-segment-display.md). [Amazon B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71). Alternate bare tube with DPs: [B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV). Idle → clock; therapy → countdown. |
 | Audio | Piezo buzzer | Stock-style beeper; single GPIO. [docs/peripherals.md](docs/peripherals.md) |
+| Front panel | New surface plate on device face | LCD → TM1637 → keypad (centerline). Mechanical + harness: [docs/front-panel.md](docs/front-panel.md) |
 
 **I²C bus (shared):** LCD backpack + keypad adapter only (scan addresses; avoid collision — LCD often **0x3F**).
 

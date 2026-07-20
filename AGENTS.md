@@ -29,6 +29,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 | Text UI | I²C LCD1602 — HD44780 + **PCF8574AT**; [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md); often **0x3F** ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
 | Clock / countdown | Prefer **TM1637** 4-digit (**CLK+DIO**, not I²C) ([B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71)); [docs/seven-segment-display.md](docs/seven-segment-display.md); alt bare tube w/ DPs ([B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV)) |
 | Beep | Piezo on one GPIO; [docs/peripherals.md](docs/peripherals.md) |
+| Front UI plate | New surface plate on unit face: LCD → TM1637 → keypad, centerline; [docs/front-panel.md](docs/front-panel.md) |
 | Logic power | **5 V USB wall charger** (not the stock timer’s internal AC→DC). Internal **2-prong receptacle** from a short cannibalized extension cord; charger plugs in there. Lamps remain mains via SSR. |
 
 ### Toolchain

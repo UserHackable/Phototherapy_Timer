@@ -43,6 +43,12 @@ It does **not** sit on the shared I²C bus with the LCD and keypad. It needs **t
 
 Timebase can come from ESP32 (SNTP over Wi‑Fi later, or RTC / free-running clock for v1).
 
+### Mechanical (panel)
+
+Two size classes exist (**0.36″** vs **0.56″** digit modules). This project’s preferred listing is **0.56″** — do **not** use the common **42 × 24 mm** 0.36″ PCB numbers for this board.
+
+**Measured on this unit** (LED housing only, not the PCB; cheap analog calipers): face **50 mm** wide × **~18.4 mm** high (±0.1 on height). Full plate notes / CAD window allowance: **[front-panel.md](front-panel.md)**.
+
 ### Wiring (provisional)
 
 | Module | ESP32 suggestion | Notes |
