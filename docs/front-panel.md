@@ -54,7 +54,7 @@ Older sketch stacked LCD → TM1637 → keypad on a custom plate ([front-panel.s
 |------|----------|
 | ESP32 + screw-terminal breakout | Inside chassis (LV hub) |
 | Keypad **PCF8574** I²C adapter | Behind panel (ribbon from pad) |
-| SSR-25DA, mains load wiring | Inside; isolated from UI harness |
+| SSR-25DA ×2 (lamps + fan), mains load wiring | Inside; isolated from UI harness; see [wiring.md](wiring.md) |
 | USB wall charger + internal AC receptacle | Inside |
 | Piezo | Inside or edge; not required on face |
 
@@ -95,7 +95,8 @@ Optional later: small passive I²C parallel block (multiple 4-pin headers) if sc
 | LCD address | **0x27** | Confirmed on this unit |
 | Keypad address | **0x20** | Confirmed on this unit |
 | TM1637 CLK / DIO | **18** / **23** | Not I²C |
-| SSR | **26** | Fail-off default LOW; **not** on front plate |
+| SSR lamps | **26** | Fail-off default LOW; **not** on front plate |
+| SSR fan | **27** | Fail-off; may rundown after lamps; **not** on front plate |
 | Piezo | **25** | Not on front plate |
 
 Bench jumper colors (I²C): SDA **orange**, SCL **yellow** — document if the permanent harness reuses them; pin numbers win if colors change.

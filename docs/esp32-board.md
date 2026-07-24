@@ -127,6 +127,19 @@ Cross-check with the table above; listing matches common WROOM mapping:
 | SPI VSPI | 23, 19, 18, 5 |
 | **I²C (default)** | **SDA 21**, **SCL 22** |
 
+### Project pin lock (summary)
+
+Full harness: **[wiring.md](wiring.md)**.
+
+| Role | GPIO |
+|------|------|
+| I²C SDA / SCL | 21 / 22 |
+| TM1637 CLK / DIO | 18 / 23 |
+| SSR lamps | **26** |
+| SSR fan | **27** |
+| Piezo | 25 |
+| Status LED (optional) | 2 |
+
 ### Pins to avoid or treat carefully
 
 | Pins | Why |

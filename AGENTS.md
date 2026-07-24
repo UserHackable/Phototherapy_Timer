@@ -24,7 +24,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 | Role | Part |
 |------|------|
 | MCU | ESP32 Type-C **38-pin narrow** + screw terminals ([B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X)) — DevKitC pinout; docs: [docs/esp32-board.md](docs/esp32-board.md); default I²C **SDA=21 SCL=22** |
-| Lamps | SSR-25DA ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — GPIO → AC ballasts; **mains hazard**; [docs/peripherals.md](docs/peripherals.md) |
+| Lamps + fan | SSR-25DA ×2 ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — lamps **GPIO26**, fan **GPIO27**; **mains hazard**; [docs/wiring.md](docs/wiring.md), [docs/peripherals.md](docs/peripherals.md) |
 | Input | 4×4 keypad + PCF8574 I²C ([B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX)); [docs/keypad-i2c.md](docs/keypad-i2c.md); address ≠ LCD |
 | Text UI | I²C LCD1602 — HD44780 + **PCF8574AT**; [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md); often **0x3F** ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
 | Clock / countdown | Prefer **TM1637** 4-digit (**CLK+DIO**, not I²C) ([B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71)); [docs/seven-segment-display.md](docs/seven-segment-display.md); alt bare tube w/ DPs ([B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV)) |
@@ -44,7 +44,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 
 ### Safety (hardware)
 
-- SSR switches **mains AC** to ballasts. Document isolation, fail-off defaults (SSR off on reset/boot/crash), and never treat GPIO experiments as safe near live wiring.
+- SSRs switch **mains AC** (lamps and fan separately). Document isolation, fail-off defaults (both SSRs off on reset/boot/crash), and never treat GPIO experiments as safe near live wiring.
 - Internal AC receptacle + USB charger: keep **mains wiring** and **5 V logic** clearly separated; do not assume the stock timer’s AC→DC is still present or reusable once that module is removed.
 - Prefer default-off for lamp drive and clear timeout / max-session bounds before “smart” features.
 

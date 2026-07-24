@@ -37,7 +37,7 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 | Role | Choice | Notes / link |
 |------|--------|----------------|
 | MCU | **ESP32** Type-C **38-pin narrow** + screw terminal breakout | Wi‑Fi + BT; DevKitC-style pinout. Details: [docs/esp32-board.md](docs/esp32-board.md). [Amazon B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X) |
-| Lamp drive | **SSR-25DA** solid-state relay | GPIO control → mains AC to **ballasts**. Docs: [docs/peripherals.md](docs/peripherals.md). [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
+| Lamp + fan drive | **SSR-25DA** ×2 | Separate GPIOs: lamps **26**, fan **27** (fan may lag off). Docs: [docs/wiring.md](docs/wiring.md), [docs/peripherals.md](docs/peripherals.md). [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) |
 | Input | 16-key **4×4** membrane + **I²C** (PCF8574) adapter | Numeric + function keys. Docs: [docs/keypad-i2c.md](docs/keypad-i2c.md). [Amazon B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX) |
 | UI text | I²C **LCD1602** (16×2), blue backlight | **HD44780** + backpack **PCF8574AT** (A-variant); **5 V DC**. See [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md). [Amazon B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S) |
 | Time / countdown | **TM1637** 4-digit clock module (preferred) | **Not I²C** — **CLK + DIO** only; colon layout; DPs not usable. Docs: [docs/seven-segment-display.md](docs/seven-segment-display.md). [Amazon B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71). Alternate bare tube with DPs: [B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV). Idle → clock; therapy → countdown. |
@@ -46,7 +46,7 @@ The stock device is basic; the replacement needs **Wi‑Fi** (and preferably **B
 
 **I²C bus (shared):** LCD backpack + keypad adapter only (scan addresses; avoid collision — LCD often **0x3F**).
 
-**GPIO (simple):** SSR enable, piezo, **TM1637 CLK/DIO** (two pins); plus enable/reset as needed.
+**GPIO (simple):** SSR lamps, SSR fan, piezo, **TM1637 CLK/DIO**; plus enable/reset as needed. Full map: [docs/wiring.md](docs/wiring.md).
 
 ### ESP32 board (MCU)
 
@@ -106,7 +106,7 @@ Full notes: **[docs/seven-segment-display.md](docs/seven-segment-display.md)**.
 
 ### SSR + piezo
 
-See **[docs/peripherals.md](docs/peripherals.md)**. SSR-25DA: control **3–32 V DC**, load **24–380 V AC / 25 A** class; heat-sink for real ballast current; GPIO default **off**.
+See **[docs/wiring.md](docs/wiring.md)** and **[docs/peripherals.md](docs/peripherals.md)**. Two SSR-25DA: lamps **GPIO26**, fan **GPIO27**; control **3–32 V DC**, load **24–380 V AC / 25 A** class; heat-sink; both default **off**. Fan may stay on briefly after lamps for cooldown.
 
 ### Low-voltage power (5 V)
 
@@ -116,7 +116,7 @@ Instead:
 
 1. **Mains inside the housing** — a short **two-prong extension cord** is cannibalized so its receptacle sits inside the unit (wired to the device’s switched/available AC as appropriate).
 2. **USB wall charger** — a common **5 V USB charger** plugs into that internal receptacle and feeds the ESP32, displays, keypad module, and other low-voltage logic.
-3. **Lamp path stays separate** — ballasts still see **mains AC** switched by the SSR; 5 V logic only *controls* the SSR, it does not power the tubes.
+3. **Lamp / fan path stays separate** — ballasts and fan still see **mains AC** switched by their SSRs; 5 V logic only *controls* the SSRs, it does not power the tubes.
 
 This keeps low-voltage bring-up simple (any decent USB charger) and isolates “ubiquitous 5 V” from redesigning a custom AC–DC stage for the controller.
 

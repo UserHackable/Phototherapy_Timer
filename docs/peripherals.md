@@ -1,10 +1,12 @@
 # Other peripherals (SSR, piezo)
 
-Lighter notes for non-UI parts. Full bring-up detail lives with mains safety practice, not just this file.
+Lighter notes for non-UI parts. **System wiring map:** [wiring.md](wiring.md). Full bring-up detail lives with mains safety practice, not just this file.
 
-## Solid-state relay (lamp / ballast control)
+## Solid-state relays (lamps + fan)
 
 Product: [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) — BlueStars **SSR-25DA**, pack of 2.
+
+Use **two** modules: one for **UV lamps / ballasts**, one for the **cooling fan**, so the fan can run a few seconds after the lamps turn off.
 
 | Item | Spec (listing) |
 |------|----------------|
@@ -19,21 +21,24 @@ Product: [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) — BlueStars
 ### Control from ESP32
 
 - Input is **DC 3–32 V** — ESP32 **3.3 V GPIO** is in range for many SSR-DA modules; verify LED/control threshold on the unit (some want ≥3 V cleanly; if marginal, drive via a small transistor from 5 V).
-- Treat like an LED load: one GPIO, **active HIGH** typically turns load on (confirm polarity silk: **+** / **−** control terminals).
-- **Default GPIO LOW / off** at boot, brown-out, and panic. Never leave lamps on across reset.
+- Treat like an LED load: one GPIO per SSR, **active HIGH** typically turns load on (confirm polarity silk: **+** / **−** control terminals).
+- **Default both GPIOs LOW / off** at boot, brown-out, and panic. Never leave lamps on across reset. Fan also fails off on reset (rundown only while the MCU is still running the session end path).
 
 ### Mains / thermal
 
-- Output switches **mains AC** to fluorescent **ballasts**. High voltage hazard.
-- **Heat sink** recommended for continuous 25 A class loads; derate for enclosed housing.
+- Outputs switch **mains AC**. High voltage hazard.
+- **Heat sink** recommended for continuous high current; derate for enclosed housing.
 - Size conductors and fusing for ballast inrush and continuous current; 25 A is an upper rating, not a target load.
 - Keep **control wiring** isolated from **load wiring**; use the metal base / mounting carefully (often tied to heatsink / chassis considerations).
 
 ### GPIO (locked)
 
-| Role | Pin |
-|------|-----|
-| SSR enable | **GPIO26** (active high; default LOW / fail-off) |
+| Role | Pin | Intent |
+|------|-----|--------|
+| SSR **lamps** | **GPIO26** | UV ballasts; active high; fail-off |
+| SSR **fan** | **GPIO27** | Cooling fan; active high; fail-off; may lag lamps off |
+
+See [wiring.md](wiring.md) for the full harness diagram.
 
 ## Piezo buzzer
 
@@ -43,7 +48,7 @@ Stock unit used a piezo beeper. Project plan: same idea — **one GPIO**.
 |------|--------|
 | Type | Passive buzzer (passive) or active beeper |
 | Drive | GPIO → series resistor; optional transistor if current is high |
-| Passive | Square wave / LEDC PWM for tone; active type: DC on/off |
+| Audio | Square wave / LEDC PWM for tone; active type: DC on/off |
 | Use | Session start/end, key click, error chirp |
 
 ### GPIO (locked)
@@ -61,6 +66,9 @@ No specific Amazon ASIN locked yet for the buzzer; document part number when pur
 | LCD1602 | I²C (PCF8574) | SDA **21**, SCL **22** |
 | Keypad | I²C (PCF8574) | shared SDA/SCL (**0x20**) |
 | TM1637 7-seg | CLK + DIO | **18** / **23** |
-| SSR (lamps) | GPIO | **26** |
+| SSR **lamps** | GPIO | **26** |
+| SSR **fan** | GPIO | **27** |
 | Piezo | GPIO | **25** |
-| Status / lamp mirror LED | GPIO | **2** (onboard blue; ON with SSR) |
+| Status / lamp mirror LED | GPIO | **2** (optional; ON with **lamps**, not fan) |
+
+Canonical diagram: [wiring.md](wiring.md).
