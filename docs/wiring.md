@@ -36,31 +36,42 @@ Good general outputs still free: **GPIO4, 5, 13, 14, 15, 16, 17, 19, 32, 33** (w
 
 ## ESP32 module headers (left / right, top → bottom)
 
-Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at the top**. Left = Espressif **J2**; right = **J3**. Silk is the board label; **This build** is the project assignment (blank = free / unused).
+Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at the top**. Left = Espressif **J2** (pins **1–19**); right = **J3** (pins **20–38**, same top→bottom order). Silk is the board label; **This build** is the project assignment; **Color** is the bench Dupont harness (— = unassigned / not used).
 
-| # | Left this build | Left silk |  | Right silk | Right this build |
-|---|-----------------|-----------|:-:|------------|------------------|
-| 1 | Logic 3.3 V rail (optional out) | **3V3** | … | **GND** | Common ground |
-| 2 | Reset (button / CHIP_PU) | **EN** | … | **23** | **TM1637 DIO** |
-| 3 | — (input only) | **VP** (GPIO36) | … | **22** | **I²C SCL** (LCD + keypad) |
-| 4 | — (input only) | **VN** (GPIO39) | … | **TX** (GPIO1) | USB serial to PC — leave free |
-| 5 | — (input only) | **34** | … | **RX** (GPIO3) | USB serial from PC — leave free |
-| 6 | — (input only) | **35** | … | **21** | **I²C SDA** (LCD + keypad) |
-| 7 | — | **32** | … | **GND** | Common ground |
-| 8 | — | **33** | … | **19** | — |
-| 9 | **Piezo** | **25** | … | **18** | **TM1637 CLK** |
-| 10 | **SSR lamps** (active HIGH) | **26** | … | **5** | — |
-| 11 | **SSR fan** (active HIGH) | **27** | … | **17** | — |
-| 12 | — | **14** | … | **16** | — |
-| 13 | — (strapping; avoid if possible) | **12** | … | **4** | — |
-| 14 | Common ground | **GND** | … | **0** | BOOT strapping — leave free |
-| 15 | — | **13** | … | **2** | **Status LED** (optional; lamps only) |
-| 16 | Flash — do not use | **D2** (GPIO9) | … | **15** | — (strapping) |
-| 17 | Flash — do not use | **D3** (GPIO10) | … | **D1** (GPIO8) | Flash — do not use |
-| 18 | Flash — do not use | **CMD** (GPIO11) | … | **D0** (GPIO7) | Flash — do not use |
-| 19 | 5 V from USB / charger (logic supply) | **5V** | … | **CLK** (GPIO6) | Flash — do not use |
+### Harness colors (locked for this build)
 
-**In use (summary):** I²C on **21/22**, TM1637 on **18/23**, piezo **25**, SSR lamps **26**, SSR fan **27**, optional LED **2**, power on **5V** / **3V3** / **GND**.
+| Color | Use |
+|-------|-----|
+| **Black** | GND |
+| **Red** | +5 V |
+| **White** | SSR lamps (GPIO26) |
+| **Grey** | SSR fan (GPIO27) |
+| **Blue** | TM1637 DIO (GPIO23) |
+| **Green** | TM1637 CLK (GPIO18) |
+
+| # L | Color | Left this build | Left silk |  | Right silk | Right this build | Color | # R |
+|----:|-------|-----------------|-----------|:-:|------------|------------------|-------|----:|
+| 1 | — | Logic 3.3 V rail (optional out) | **3V3** | … | **GND** | Common ground | **Black** | 20 |
+| 2 | — | Reset (button / CHIP_PU) | **EN** | … | **23** | **TM1637 DIO** | **Blue** | 21 |
+| 3 | — | — (input only) | **VP** (GPIO36) | … | **22** | **I²C SCL** (LCD + keypad) | — | 22 |
+| 4 | — | — (input only) | **VN** (GPIO39) | … | **TX** (GPIO1) | USB serial to PC — leave free | — | 23 |
+| 5 | — | — (input only) | **34** | … | **RX** (GPIO3) | USB serial from PC — leave free | — | 24 |
+| 6 | — | — (input only) | **35** | … | **21** | **I²C SDA** (LCD + keypad) | — | 25 |
+| 7 | — | — | **32** | … | **GND** | Common ground | **Black** | 26 |
+| 8 | — | — | **33** | … | **19** | — | — | 27 |
+| 9 | — | **Piezo** | **25** | … | **18** | **TM1637 CLK** | **Green** | 28 |
+| 10 | **White** | **SSR lamps** (active HIGH) | **26** | … | **5** | — | — | 29 |
+| 11 | **Grey** | **SSR fan** (active HIGH) | **27** | … | **17** | — | — | 30 |
+| 12 | — | — | **14** | … | **16** | — | — | 31 |
+| 13 | — | — (strapping; avoid if possible) | **12** | … | **4** | — | — | 32 |
+| 14 | **Black** | Common ground | **GND** | … | **0** | BOOT strapping — leave free | — | 33 |
+| 15 | — | — | **13** | … | **2** | **Status LED** (optional; lamps only) | — | 34 |
+| 16 | — | Flash — do not use | **D2** (GPIO9) | … | **15** | — (strapping) | — | 35 |
+| 17 | — | Flash — do not use | **D3** (GPIO10) | … | **D1** (GPIO8) | Flash — do not use | — | 36 |
+| 18 | — | Flash — do not use | **CMD** (GPIO11) | … | **D0** (GPIO7) | Flash — do not use | — | 37 |
+| 19 | **Red** | 5 V from USB / charger (logic supply) | **5V** | … | **CLK** (GPIO6) | Flash — do not use | — | 38 |
+
+**In use (summary):** I²C on **21/22**, TM1637 on **18/23** (green/blue), piezo **25**, SSR lamps **26** (white), SSR fan **27** (grey), optional LED **2**, power **5V** red / **GND** black.
 
 ## Block diagram
 
@@ -134,7 +145,7 @@ All UI modules stay on **0.1″ headers + female Dupont** for v1 ([front-panel.m
 | SSR lamps control | **+** / **−** (DC input) | GPIO26 → **+**, GND → **−** |
 | SSR fan control | **+** / **−** | GPIO27 → **+**, GND → **−** |
 
-Bench I²C colors (optional): SDA **orange**, SCL **yellow** — pin numbers win if colors change.
+Bench harness colors: see table above (GND black, +5 V red, SSR lamps white, SSR fan grey, TM1637 DIO blue / CLK green). Pin numbers win if a lead is re-colored.
 
 ## SSR lamps vs SSR fan
 
@@ -183,3 +194,4 @@ Confirm SSR terminal silk and ballast wiring against the stock unit before energ
 |------|--------|
 | 2026-07-23 | Initial wiring diagram: pin budget, mermaid + ASCII, dual SSR (lamps 26 / fan 27) |
 | 2026-07-23 | Left/right ESP header table with per-pin project assignments |
+| 2026-07-24 | Harness colors + right-side pin #s 20–38; column order use/silk/…/silk/use |
