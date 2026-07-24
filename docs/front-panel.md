@@ -10,38 +10,43 @@ Related: [lcd1602-i2c.md](lcd1602-i2c.md) · [seven-segment-display.md](seven-se
 
 | Item | State |
 |------|--------|
-| Mounting strategy | **New surface plate** on the front of the device |
-| Layout | Top → bottom: **LCD1602**, **TM1637**, **4×4 keypad** |
-| Alignment | All three **centered on the plate vertical centerline** (left–right centered in one column) |
-| Part dimensions | **Not yet calipered on this build** — tables below are community / listing nominals + design tolerances |
-| CAD / print | OpenSCAD layout: [mechanical/front-panel.scad](mechanical/front-panel.scad) (faces coplanar with keypad) |
+| Mounting strategy | Prefer stock **top-frame metal** (front strip + enclosure mate); optional new surface plate still in [mechanical/front-panel.scad](mechanical/front-panel.scad) |
+| Layout (stock top frame) | Top → bottom: **TM1637 LED** (in front-strip rectangular hole), **LCD1602**, **4×4 keypad** |
+| Alignment | Modules **centered** on the frame vertical centerline |
+| Part dimensions | Stock top / enclosure metal: [mechanical/top-frame-parts-scan.md](mechanical/top-frame-parts-scan.md). UI modules: [mechanical/component-modules-scan.md](mechanical/component-modules-scan.md). Assembly 2D: [mechanical/top-frame-assembly-2d.scad](mechanical/top-frame-assembly-2d.scad) |
+| CAD / print | Top frame: [mechanical/top-frame-assembly-2d.scad](mechanical/top-frame-assembly-2d.scad). Alternate new plate: [mechanical/front-panel.scad](mechanical/front-panel.scad) |
 
 ## Layout (operator-facing)
+
+### Stock top frame (preferred)
 
 ```text
         │ centerline
         ▼
-┌──────────────────────────────┐  ← surface plate (width ≥ keypad)
-│                              │
+┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐  ← front strip (long bar)
 │      ┌────────────────┐      │
-│      │   LCD 16×2     │      │  status / prompts
-│      └────────────────┘      │
-│                              │
-│        ┌──────────┐          │
-│        │  TM1637  │          │  clock / countdown
-│        └──────────┘          │
-│                              │
-│      ┌────────────────┐      │
-│      │   4×4 KEYPAD   │      │  entry / start / stop
-│      │                │      │
-│      └────────────────┘      │
-│           ribbon ↓           │  keypad tail → I²C adapter (behind)
-└──────────────────────────────┘
+│      │  TM1637 LED    │      │  ONE module — clock / countdown
+│      └────────────────┘      │  ← rectangular hole in front strip
+├ ─ ─ ─ ─ bolt line ─ ─ ─ ─ ─ ─┤
+│ ╔ cover plate on mate ══════╗│
+│ ║    ┌──────────────┐       ║│  ← LCD cutout (shrunk main hole;
+│ ║    │  LCD 16×2    │       ║│     uses wider upper portion)
+│ ║    └──────────────┘       ║│
+│ ║    ┌──────────────┐       ║│  ← solid cover = keypad backer
+│ ║    │  4×4 KEYPAD  │       ║│     (covers stock bottom slot)
+│ ║    │              │       ║│
+│ ║    └──────────────┘       ║│
+│ ╚═══════════════════════════╝│
+└ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘  ← enclosure mate under front
 ```
 
-- **Plate width** follows the widest part (almost always the membrane keypad).
-- **LCD** and **TM1637** are narrower; keep them on the same centerline, not left-aligned to the keypad edge.
-- Gaps between parts are free parameters until measured sizes exist; leave room for bezel lips and finger clearance on the pad.
+- **One TM1637** in the front-strip rectangular hole.
+- **Cover plate** (new part on the mate face): blanks the mate **bottom slot**, shrinks the **large main hole** to an LCD-sized window in the wider upper portion, and backs the **keypad**.
+- Keep all three modules on the same vertical centerline.
+
+### Alternate: new surface plate only
+
+Older sketch stacked LCD → TM1637 → keypad on a custom plate ([front-panel.scad](mechanical/front-panel.scad)). Prefer the stock top-frame layout above unless the custom plate is revived.
 
 ### What is *not* on the plate
 

@@ -1,0 +1,6 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "ESP32_DevKitC") (type "KiCad") (uri "/home/rob/User-Hackable/Phototherapy_Timer/KiCad/libraries/ESP32_DevKitC/ESP32_DevKitC.pretty") (options "") (descr ""))
+	(lib (name "Espressif") (type "KiCad") (uri "/home/rob/KiCad/espressif/kicad-libraries/footprints/Espressif.pretty") (options "") (descr ""))
+	(lib (name "fp_esp32_dev4") (type "KiCad") (uri "/home/rob/KiCad/esp32_devkit_38Pins/fp_esp32_dev4.pretty") (options "") (descr ""))
+)

@@ -27,3 +27,13 @@ esp32_firmware/apps/*/managed_components/
 # Editor / OS junk
 *~
 .DS_Store
+
+# --- KiCad local / generated junk ---------------------------------------------
+# Local recovery history (can nest its own .git; never commit)
+**/.history/
+**/fp-info-cache
+**/*-backups/
+**/*.bak
+**/*.kicad_prl
+**/\#auto_saved_files\#
+**/*~*.lck

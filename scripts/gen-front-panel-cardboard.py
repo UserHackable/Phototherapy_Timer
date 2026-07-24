@@ -4,7 +4,7 @@
 Output: docs/mechanical/front-panel-cardboard.pdf
 
 Matches defaults in docs/mechanical/front-panel.scad:
-  LCD 71x24, TM1637 50x18.4, keypad 68.3x75.5, gaps 10 mm, margins 12/10/12.
+  top → TM1637 50x18.4 → LCD 71x24 → keypad 68.3x75.5 → bottom; gaps 10 mm.
 
 Print at 100% / Actual size (no fit-to-page). Verify the 100 mm scale bar
 with a ruler before cutting.
@@ -21,11 +21,12 @@ PAGE_W, PAGE_H = 612.0, 792.0  # US Letter points
 MM = 72.0 / 25.4
 
 # Keep in sync with docs/mechanical/front-panel.scad
-LCD_W, LCD_H = 71.0, 24.0
+# Order: top → TM1637 → LCD → keypad → bottom
 TM_W, TM_H = 50.0, 18.4
+LCD_W, LCD_H = 71.0, 24.0
 KEY_W, KEY_H = 68.3, 75.5
-GAP_LCD_TM = 10.0
-GAP_TM_KEY = 10.0
+GAP_TM_LCD = 10.0
+GAP_LCD_KEY = 10.0
 MARGIN_X = 12.0
 MARGIN_TOP = 10.0
 MARGIN_BOTTOM = 12.0
@@ -37,22 +38,22 @@ def pdf_escape(s: str) -> str:
 
 
 def layout():
-    content_h = LCD_H + GAP_LCD_TM + TM_H + GAP_TM_KEY + KEY_H
+    content_h = TM_H + GAP_TM_LCD + LCD_H + GAP_LCD_KEY + KEY_H
     content_w = max(LCD_W, TM_W, KEY_W)
     plate_w = content_w + 2 * MARGIN_X
     plate_h = content_h + MARGIN_TOP + MARGIN_BOTTOM
     # centers relative to plate center (same as OpenSCAD)
     y_top = plate_h / 2 - MARGIN_TOP
-    y_lcd = y_top - LCD_H / 2
-    y_tm = y_lcd - LCD_H / 2 - GAP_LCD_TM - TM_H / 2
-    y_key = y_tm - TM_H / 2 - GAP_TM_KEY - KEY_H / 2
+    y_tm = y_top - TM_H / 2
+    y_lcd = y_tm - TM_H / 2 - GAP_TM_LCD - LCD_H / 2
+    y_key = y_lcd - LCD_H / 2 - GAP_LCD_KEY - KEY_H / 2
     return {
         "content_w": content_w,
         "content_h": content_h,
         "plate_w": plate_w,
         "plate_h": plate_h,
-        "y_lcd": y_lcd,
         "y_tm": y_tm,
+        "y_lcd": y_lcd,
         "y_key": y_key,
     }
 
@@ -181,8 +182,8 @@ def page_cut_template(L: dict) -> bytes:
         PAGE_H - 54,
         (
             f"Plate {L['plate_w']:.1f} x {L['plate_h']:.1f} mm  |  "
-            f"LCD {LCD_W:g}x{LCD_H:g}  TM {TM_W:g}x{TM_H:g}  Key {KEY_W:g}x{KEY_H:g}  |  "
-            f"gaps {GAP_LCD_TM:g}/{GAP_TM_KEY:g} mm  |  openings +{CUTOUT_CLEAR:g} mm clear"
+            f"TM {TM_W:g}x{TM_H:g}  LCD {LCD_W:g}x{LCD_H:g}  Key {KEY_W:g}x{KEY_H:g}  |  "
+            f"gaps {GAP_TM_LCD:g}/{GAP_LCD_KEY:g} mm  |  openings +{CUTOUT_CLEAR:g} mm clear"
         ),
         size=7,
     )
@@ -214,8 +215,8 @@ def page_cut_template(L: dict) -> bytes:
     d.solid()
 
     faces = [
-        ("LCD bezel", LCD_W, LCD_H, L["y_lcd"], (0.1, 0.2, 0.7)),
         ("TM1637", TM_W, TM_H, L["y_tm"], (0.6, 0.1, 0.1)),
+        ("LCD bezel", LCD_W, LCD_H, L["y_lcd"], (0.1, 0.2, 0.7)),
         ("Keypad", KEY_W, KEY_H, L["y_key"], (0.15, 0.15, 0.15)),
     ]
 
@@ -272,7 +273,7 @@ def page_faces_only(L: dict) -> bytes:
     d.text(
         36,
         PAGE_H - 42,
-        "Same sizes/gaps as cut template. PRINT 100%. Place LCD, TM1637, keypad on dashed boxes.",
+        "Same sizes/gaps as cut template. PRINT 100%. Place TM1637, LCD, keypad on dashed boxes.",
         size=8,
     )
 
@@ -289,13 +290,11 @@ def page_faces_only(L: dict) -> bytes:
     cx = PAGE_W / 2
     # top of stack near top of page
     top_y = PAGE_H - 100
-    # local Y: top of content at content_h/2 in scad; map so LCD top is at top_y
-    # In plate coords, content top is at plate_h/2 - margin_top = y_lcd + lcd_h/2
-    y_lcd_top = L["y_lcd"] + LCD_H / 2
+    # map plate Y so content top (TM top) -> top_y
+    y_stack_top = L["y_tm"] + TM_H / 2
 
     def to_page(lx: float, ly: float) -> tuple[float, float]:
-        # map plate Y so y_lcd_top -> top_y
-        return cx + lx * MM, top_y - (y_lcd_top - ly) * MM
+        return cx + lx * MM, top_y - (y_stack_top - ly) * MM
 
     # light plate footprint dashed
     d.dash(2, 2)
@@ -307,8 +306,8 @@ def page_faces_only(L: dict) -> bytes:
     d.solid()
 
     faces = [
-        ("LCD bezel 71 x 24 mm", LCD_W, LCD_H, L["y_lcd"], (0.1, 0.25, 0.7)),
         ("TM1637 50 x 18.4 mm", TM_W, TM_H, L["y_tm"], (0.7, 0.15, 0.1)),
+        ("LCD bezel 71 x 24 mm", LCD_W, LCD_H, L["y_lcd"], (0.1, 0.25, 0.7)),
         ("Keypad 68.3 x 75.5 mm", KEY_W, KEY_H, L["y_key"], (0.1, 0.45, 0.2)),
     ]
     for name, fw, fh, ly, rgb in faces:
@@ -324,13 +323,13 @@ def page_faces_only(L: dict) -> bytes:
     d.dash(1, 2)
     d.stroke_rgb(0.8, 0.3, 0.1, 0.5)
     x0, y0 = to_page(0, L["y_key"] - KEY_H / 2 - 5)
-    x1, y1 = to_page(0, L["y_lcd"] + LCD_H / 2 + 5)
+    x1, y1 = to_page(0, L["y_tm"] + TM_H / 2 + 5)
     d.line(x0, y0, x1, y1)
     d.solid()
 
     d.fill_rgb(0.2, 0.2, 0.2)
     d.text(36, 30, "Use this page to check part placement before cutting the plate on page 1.", size=8)
-    d.text(36, 16, "Gaps: LCD-TM 10 mm, TM-keypad 10 mm. Faces coplanar on finished plate.", size=7)
+    d.text(36, 16, "Order: TM1637 → LCD → keypad. Gaps 10 mm. Faces coplanar on finished plate.", size=7)
 
     return d.done()
 

@@ -1,7 +1,7 @@
 // Phototherapy Timer — front surface plate (UI faces)
 //
-// Operator-facing stack, vertical centerline:
-//   top → LCD bezel → TM1637 housing → 4×4 keypad → bottom
+// Operator-facing stack, vertical centerline (matches stock top frame):
+//   top → TM1637 LED → LCD1602 → 4×4 keypad → bottom
 //
 // Display faces are COPLANAR with the keypad face (flush front plane).
 // Backpacks / PCB bulk hang behind the plate (not modeled in detail yet).
@@ -15,24 +15,24 @@
 // STL:      openscad -o docs/mechanical/front-panel.stl docs/mechanical/front-panel.scad
 
 /* [Faces — measured] */
+// TM1637 LED housing face (mm) — not full PCB; ONE module at top
+tm_w = 50;
+tm_h = 18.4;
+
 // LCD bezel face (mm)
 lcd_w = 71;
 lcd_h = 24;
-
-// TM1637 LED housing face (mm) — not full PCB
-tm_w = 50;
-tm_h = 18.4;
 
 // Keypad membrane outer (mm) — 2 11/16" x (3" - 1/32")
 key_w = 68.3;
 key_h = 75.5;
 
 /* [Layout] */
-// Gap between LCD bottom and TM1637 top (mm)
-gap_lcd_tm = 10;
+// Gap between TM1637 bottom and LCD top (mm)
+gap_tm_lcd = 10;
 
-// Gap between TM1637 bottom and keypad top (mm)
-gap_tm_key = 10;
+// Gap between LCD bottom and keypad top (mm)
+gap_lcd_key = 10;
 
 // Margin around content to plate outer edge (mm)
 margin_x = 12;
@@ -66,17 +66,18 @@ $fn = 32;
 // ---- derived layout (Y up, X right, Z toward operator) ----
 // Origin: plate center in X, front face at Z=0, Y=0 at vertical center of content stack.
 
-content_h = lcd_h + gap_lcd_tm + tm_h + gap_tm_key + key_h;
+content_h = tm_h + gap_tm_lcd + lcd_h + gap_lcd_key + key_h;
 content_w = max(lcd_w, tm_w, key_w);
 
 plate_w = content_w + 2 * margin_x;
 plate_h = content_h + margin_top + margin_bottom;
 
 // Y of each face center (content centered on plate)
+// top → TM1637 → LCD → keypad → bottom
 y_top = plate_h / 2 - margin_top;
-y_lcd = y_top - lcd_h / 2;
-y_tm  = y_lcd - lcd_h / 2 - gap_lcd_tm - tm_h / 2;
-y_key = y_tm  - tm_h / 2 - gap_tm_key - key_h / 2;
+y_tm  = y_top - tm_h / 2;
+y_lcd = y_tm  - tm_h / 2 - gap_tm_lcd - lcd_h / 2;
+y_key = y_lcd - lcd_h / 2 - gap_lcd_key - key_h / 2;
 
 // Plate occupies Z = [-plate_thickness, 0]; front skin at Z = 0.
 // Face inserts sit on the front plane so LCD / TM / keypad are coplanar.
@@ -175,9 +176,10 @@ if (show_centerline)
 
 // Echo layout summary in console when rendered/previewed
 echo("=== front-panel layout (mm) ===");
+echo("order: top → TM1637 → LCD → keypad → bottom");
 echo("plate_w x plate_h x t =", plate_w, plate_h, plate_thickness);
 echo("content_w x content_h =", content_w, content_h);
-echo("lcd center Y =", y_lcd, " size", lcd_w, "x", lcd_h);
 echo("tm  center Y =", y_tm,  " size", tm_w, "x", tm_h);
+echo("lcd center Y =", y_lcd, " size", lcd_w, "x", lcd_h);
 echo("key center Y =", y_key, " size", key_w, "x", key_h);
 echo("faces coplanar at Z~0 (even with keypad)");
