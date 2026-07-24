@@ -17,8 +17,10 @@ secrets/
 
 esp32_firmware/apps/
   wifi_scan/            # list visible APs (no secrets)
-  wifi_connect/         # STA connect using generated credentials
+  wifi_connect/         # STA connect via NVS + DHCP + SNTP + UDP discovery
   blink/                # unrelated bring-up
+
+server/                 # Rails app: Device records + UDP discovery listener
 ```
 
 ### `secrets/wifi.yaml` shape
@@ -77,7 +79,22 @@ $EDITOR secrets/wifi.yaml
 ./scripts/fw idf monitor wifi_connect
 ```
 
-On success the log should show **DHCP got ip** and **local time** from SNTP.
+On success the log should show **DHCP got ip**, **local time** from SNTP, and
+(when Rails is running) a **discovery PONG** / `server known` line.
+
+### LAN time (SNTP) and discovery host
+
+`wifi_connect` prefers SNTP servers in this order:
+
+1. LAN host — `SNTP_SERVER_LAN` in `main.c` (currently `192.168.1.163`)
+2. `pool.ntp.org`
+3. `time.google.com`
+
+Requires `CONFIG_LWIP_SNTP_MAX_SERVERS=3` (set in `sdkconfig.defaults`).
+
+The same LAN IP is the first **unicast** target for UDP device discovery
+(port 3000). Full discovery setup (Rails, UFW, protocol):
+[device-discovery.md](device-discovery.md).
 
 Optional: list SSIDs this PC already knows (no passwords):
 
@@ -126,4 +143,4 @@ Flash target: default single-app NVS partition at **0x9000**, size **0x6000** (o
 | `./scripts/export-known-wifi.sh` | Host known SSIDs → YAML (no passwords) |
 | `./scripts/fw idf nvs-wifi` | First entry of `secrets/wifi.yaml` → device NVS |
 | `./scripts/fw idf upload wifi_scan` | See airwaves (no secrets) |
-| `./scripts/fw idf upload wifi_connect` | Connect via NVS + DHCP + SNTP |
+| `./scripts/fw idf upload wifi_connect` | Connect via NVS + DHCP + SNTP + UDP discovery |

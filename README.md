@@ -152,14 +152,16 @@ Exact SDK (ESP-IDF, PlatformIO CLI, etc.) is TBD; keep builds and flash steps ru
 ./scripts/export-known-wifi.sh         # known SSIDs → known_wifi.yaml (no passwords)
 cp secrets/wifi.yaml.example secrets/wifi.yaml   # edit passwords (gitignored)
 ./scripts/fw idf nvs-wifi              # first network → device NVS
-./scripts/fw idf upload wifi_connect   # connect + DHCP + SNTP time
+./scripts/fw idf upload wifi_connect   # connect + DHCP + SNTP + UDP discovery
 ```
 
-Wi‑Fi / NVS design: [docs/wifi-config.md](docs/wifi-config.md).
+Wi‑Fi / NVS: [docs/wifi-config.md](docs/wifi-config.md).  
+ESP ↔ Rails discovery (UDP 3000, UFW, Devices UI): [docs/device-discovery.md](docs/device-discovery.md).  
+Rails app: [server/README.md](server/README.md).
 
 ## Status
 
-Early stage — hardware docs + dual toolchain scaffold. Next: flash hello on hardware; capture stock timer behavior; I/O bring-up.
+Early stage — dual toolchain, external-antenna board bring-up, Rails Device discovery on the LAN. Next: product UI / session features on top of discovery.
 
 ## Remotes
 

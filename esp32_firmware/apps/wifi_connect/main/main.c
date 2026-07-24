@@ -2,14 +2,22 @@
  * ESP-IDF app: wifi_connect
  *
  * Reads one network from NVS namespace "wifi" (ssid, password).
- * Connects as STA (DHCP), syncs wall time via SNTP.
+ * Connects as STA (DHCP), syncs wall time via SNTP, then discovers the
+ * Phototherapy Rails server via UDP broadcast PING/PONG.
  *
  * After online:
+ *   - UDP discovery (broadcast PING, wait for server PONG)
  *   - Print local time every 1 minute from the internal clock
  *   - Refresh time from the network every 6 hours
- *   - Refresh time again when the link drops and DHCP returns
+ *   - Re-run discovery / SNTP when the link drops and DHCP returns
  *
  * Never logs the password. SSR / lamp path unused.
+ *
+ * Wire protocol (matches server/app/services/udp_discovery_listener.rb):
+ *   ESP → broadcast :3000
+ *     PHOTOTHERAPY/1 PING identity=esp32-<mac>
+ *   Server → unicast reply
+ *     PHOTOTHERAPY/1 PONG identity=<hostname> ip=<server_ip>
  *
  *   ./scripts/nvs-wifi-provision.sh
  *   ./scripts/fw idf upload wifi_connect
@@ -22,6 +30,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
@@ -29,6 +38,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -56,14 +68,28 @@ static const char *TAG = "wifi_connect";
 #define SNTP_PERIOD_US         (6LL * 60 * 60 * 1000000LL) /* 6 hours */
 #define SNTP_WAIT_MAX_RETRIES  30
 
+/* UDP discovery — must match Rails UdpDiscoveryListener defaults. */
+#define DISCOVERY_PORT           3000
+#define DISCOVERY_PROTOCOL       "PHOTOTHERAPY/1"
+#define DISCOVERY_TIMEOUT_MS     2000
+#define DISCOVERY_ATTEMPTS       3
+#define DISCOVERY_PERIOD_MS      (5 * 60 * 1000) /* re-announce every 5 min */
+
 static EventGroupHandle_t s_wifi_events;
 static int s_retry;
 
 /** Set when we need a network time pull (boot, 6h timer, or reconnect). */
 static volatile bool s_need_sntp;
 static volatile bool s_have_ip;
+static volatile bool s_need_discovery;
 static bool s_sntp_started;
 static int64_t s_last_sntp_us;
+static int64_t s_last_discovery_us;
+
+static char s_device_identity[40];
+static char s_server_ip[16];
+static char s_server_identity[64];
+static bool s_have_server;
 
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -71,6 +97,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_have_ip = false;
+        s_have_server = false;
         s_retry++;
         ESP_LOGW(TAG, "Wi‑Fi disconnected, reconnect attempt %d", s_retry);
         esp_wifi_connect();
@@ -84,6 +111,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         s_have_ip = true;
         /* Initial connect and every reconnect after a drop: refresh network time. */
         s_need_sntp = true;
+        s_need_discovery = true;
         xEventGroupSetBits(s_wifi_events, GOT_IP_BIT);
     }
 }
@@ -244,6 +272,211 @@ static bool six_hours_elapsed(void)
     return (esp_timer_get_time() - s_last_sntp_us) >= SNTP_PERIOD_US;
 }
 
+static void build_device_identity(void)
+{
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(s_device_identity, sizeof(s_device_identity),
+             "esp32-%02x%02x%02x%02x%02x%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "device identity: %s", s_device_identity);
+}
+
+/** Extract key=value (unquoted token) from a discovery line. */
+static bool extract_field(const char *text, const char *key, char *out, size_t out_len)
+{
+    char pattern[32];
+    snprintf(pattern, sizeof(pattern), "%s=", key);
+    const char *p = strstr(text, pattern);
+    if (!p) {
+        return false;
+    }
+    p += strlen(pattern);
+    size_t n = 0;
+    while (p[n] && p[n] != ' ' && p[n] != '\r' && p[n] != '\n' && n + 1 < out_len) {
+        out[n] = p[n];
+        n++;
+    }
+    out[n] = '\0';
+    return n > 0;
+}
+
+static bool parse_pong(const char *msg, char *ident_out, size_t ident_len,
+                       char *ip_out, size_t ip_len)
+{
+    if (!strstr(msg, "PONG")) {
+        return false;
+    }
+    /* Avoid treating our own PING echo as a reply. */
+    if (strstr(msg, "PING")) {
+        return false;
+    }
+    if (!extract_field(msg, "ip", ip_out, ip_len)) {
+        return false;
+    }
+    if (!extract_field(msg, "identity", ident_out, ident_len)) {
+        snprintf(ident_out, ident_len, "(unknown)");
+    }
+    return true;
+}
+
+static void discovery_send(int sock, const char *payload, size_t plen,
+                           uint32_t addr_nbo, const char *label)
+{
+    struct sockaddr_in dest = {0};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(DISCOVERY_PORT);
+    dest.sin_addr.s_addr = addr_nbo;
+
+    char astr[16];
+    ip4_addr_t a = { .addr = addr_nbo };
+    ip4addr_ntoa_r(&a, astr, sizeof(astr));
+    ESP_LOGI(TAG, "discovery PING → %s:%d (%s)", astr, DISCOVERY_PORT, label);
+
+    if (sendto(sock, payload, plen, 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+        ESP_LOGW(TAG, "discovery sendto %s failed: errno %d", astr, errno);
+    }
+}
+
+/**
+ * Send discovery PINGs (unicast known hosts + broadcast) and wait for a PONG.
+ * Returns true if a server replied (s_server_* filled).
+ *
+ * Unicast to known LAN hosts is tried first: many APs drop client broadcasts
+ * or isolate clients for 255.255.255.255 while still allowing peer unicast.
+ */
+static bool discovery_once(void)
+{
+    if (!s_have_ip) {
+        return false;
+    }
+
+    char payload[128];
+    int plen = snprintf(payload, sizeof(payload),
+                        "%s PING identity=%s", DISCOVERY_PROTOCOL, s_device_identity);
+    if (plen <= 0 || plen >= (int)sizeof(payload)) {
+        return false;
+    }
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "discovery socket failed: errno %d", errno);
+        return false;
+    }
+
+    int yes = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes)) != 0) {
+        ESP_LOGW(TAG, "SO_BROADCAST failed: errno %d", errno);
+    }
+
+    struct timeval tv = {
+        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
+        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
+    };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    ESP_LOGI(TAG, "discovery payload: %s", payload);
+
+    /* 1) Unicast to known/build-PC address (chrony / Rails host). */
+    {
+        ip4_addr_t known;
+        if (ip4addr_aton(SNTP_SERVER_LAN, &known)) {
+            discovery_send(sock, payload, (size_t)plen, known.addr, "known LAN host");
+        }
+    }
+
+    /* 2) Unicast to default gateway (often the only fixed LAN peer). */
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info = {0};
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+        if (ip_info.gw.addr != 0) {
+            discovery_send(sock, payload, (size_t)plen, ip_info.gw.addr, "gateway");
+        }
+        /* 3) Subnet broadcast */
+        uint32_t bcast = (ip_info.ip.addr & ip_info.netmask.addr) | ~ip_info.netmask.addr;
+        discovery_send(sock, payload, (size_t)plen, bcast, "subnet broadcast");
+    }
+
+    /* 4) Limited broadcast */
+    discovery_send(sock, payload, (size_t)plen, htonl(INADDR_BROADCAST), "255.255.255.255");
+
+    bool found = false;
+    int64_t deadline = esp_timer_get_time() + ((int64_t)DISCOVERY_TIMEOUT_MS * 1000);
+    while (esp_timer_get_time() < deadline) {
+        char rx[256];
+        struct sockaddr_in src = {0};
+        socklen_t slen = sizeof(src);
+        int n = recvfrom(sock, rx, sizeof(rx) - 1, 0,
+                         (struct sockaddr *)&src, &slen);
+        if (n < 0) {
+            break; /* timeout or error */
+        }
+        rx[n] = '\0';
+
+        char ident[64] = {0};
+        char sip[16] = {0};
+        if (!parse_pong(rx, ident, sizeof(ident), sip, sizeof(sip))) {
+            ESP_LOGD(TAG, "discovery ignore: %s", rx);
+            continue;
+        }
+
+        strncpy(s_server_identity, ident, sizeof(s_server_identity) - 1);
+        strncpy(s_server_ip, sip, sizeof(s_server_ip) - 1);
+        s_have_server = true;
+        found = true;
+
+        char from[16];
+        ip4_addr_t from_a = { .addr = src.sin_addr.s_addr };
+        ip4addr_ntoa_r(&from_a, from, sizeof(from));
+        ESP_LOGI(TAG, "discovery PONG from %s: identity=%s ip=%s",
+                 from, s_server_identity, s_server_ip);
+        break;
+    }
+
+    close(sock);
+
+    if (!found) {
+        ESP_LOGW(TAG, "discovery: no server PONG (is Rails on UDP %d at %s?)",
+                 DISCOVERY_PORT, SNTP_SERVER_LAN);
+    }
+    return found;
+}
+
+static void run_discovery(const char *reason)
+{
+    if (!s_have_ip) {
+        ESP_LOGW(TAG, "discovery skip (%s): no IP", reason);
+        return;
+    }
+
+    ESP_LOGI(TAG, "discovery start (%s), identity=%s", reason, s_device_identity);
+
+    bool ok = false;
+    for (int i = 0; i < DISCOVERY_ATTEMPTS && !ok; i++) {
+        if (i > 0) {
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+        ok = discovery_once();
+    }
+
+    s_last_discovery_us = esp_timer_get_time();
+    s_need_discovery = false;
+
+    if (ok) {
+        ESP_LOGI(TAG, "server known: identity=%s ip=%s",
+                 s_server_identity, s_server_ip);
+    }
+}
+
+static bool discovery_period_elapsed(void)
+{
+    if (s_last_discovery_us == 0) {
+        return true;
+    }
+    return (esp_timer_get_time() - s_last_discovery_us) >=
+           ((int64_t)DISCOVERY_PERIOD_MS * 1000);
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "wifi_connect (NVS) starting");
@@ -255,6 +488,8 @@ void app_main(void)
     } else {
         ESP_ERROR_CHECK(ret);
     }
+
+    build_device_identity();
 
     char ssid[33] = {0};
     char pass[65] = {0};
@@ -271,14 +506,26 @@ void app_main(void)
     /* First network time pull after DHCP. */
     sync_time_from_network("initial connect");
 
-    ESP_LOGI(TAG, "online — print every 1 min (internal clock); SNTP every 6 h and on reconnect");
+    /* Announce ourselves to the LAN Rails server. */
+    run_discovery("initial connect");
+
+    ESP_LOGI(TAG, "online — discovery every %d min; time print every 1 min; SNTP every 6 h",
+             DISCOVERY_PERIOD_MS / 60000);
 
     while (1) {
         print_internal_time();
+        if (s_have_server) {
+            ESP_LOGI(TAG, "server %s @ %s", s_server_identity, s_server_ip);
+        }
 
         if (s_need_sntp || six_hours_elapsed()) {
             const char *why = s_need_sntp ? "reconnect / requested" : "6 hour refresh";
             sync_time_from_network(why);
+        }
+
+        if (s_need_discovery || discovery_period_elapsed()) {
+            const char *why = s_need_discovery ? "reconnect / requested" : "periodic";
+            run_discovery(why);
         }
 
         vTaskDelay(pdMS_TO_TICKS(PRINT_PERIOD_MS));
