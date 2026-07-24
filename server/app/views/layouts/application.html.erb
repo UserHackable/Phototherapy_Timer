@@ -24,6 +24,15 @@
   </head>
 
   <body>
+    <% if authenticated? %>
+      <header style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+        <strong><%= Current.user.name %></strong>
+        <span><%= Current.user.email_address %></span>
+        <%= link_to "Devices", devices_path %>
+        <%= link_to "Users", users_path %>
+        <%= button_to "Sign out", session_path, method: :delete %>
+      </header>
+    <% end %>
     <%= yield %>
   </body>
 </html>

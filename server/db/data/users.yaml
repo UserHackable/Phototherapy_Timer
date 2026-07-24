@@ -1,0 +1,13 @@
+# Seed users for PhototherapyServer (order is intentional).
+# Email: <name>@ferney.org
+# Passwords are set only in db/seeds.rb (not stored here).
+---
+- name: rob
+- name: shirlene
+- name: sean
+- name: keith
+- name: kyle
+- name: ethan
+- name: jacob
+- name: austin
+- name: miriam

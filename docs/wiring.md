@@ -167,7 +167,7 @@ The Amazon pack is **two SSR-25DA** units ([B0CBS8817G](https://www.amazon.com/d
 
 ### Firmware note
 
-As of this doc, `session_timer` still drives a **single** `SSR_GPIO` (26) for “lamp path.” Fan on **27** is the **wiring / pin lock**; product logic for rundown is a follow-up change in firmware.
+`session_timer` drives **GPIO26** (lamps) and **GPIO27** (fan). Fan turns on with the lamps and stays on for **30 s** after lamp-off (rundown); reset still forces both SSRs off.
 
 ## Mains load side (conceptual)
 

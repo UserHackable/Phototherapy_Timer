@@ -3,6 +3,7 @@ require "test_helper"
 class DevicesControllerTest < ActionDispatch::IntegrationTest
   setup do
     @device = devices(:one)
+    sign_in_as users(:one)
   end
 
   test "should get index" do
@@ -44,5 +45,11 @@ class DevicesControllerTest < ActionDispatch::IntegrationTest
     end
 
     assert_redirected_to devices_url
+  end
+
+  test "guest is redirected to sign in" do
+    sign_out
+    get devices_url
+    assert_redirected_to new_session_path
   end
 end

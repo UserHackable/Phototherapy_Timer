@@ -106,7 +106,7 @@ Full notes: **[docs/seven-segment-display.md](docs/seven-segment-display.md)**.
 
 ### SSR + piezo
 
-See **[docs/wiring.md](docs/wiring.md)** and **[docs/peripherals.md](docs/peripherals.md)**. Two SSR-25DA: lamps **GPIO26**, fan **GPIO27**; control **3–32 V DC**, load **24–380 V AC / 25 A** class; heat-sink; both default **off**. Fan may stay on briefly after lamps for cooldown.
+See **[docs/wiring.md](docs/wiring.md)** and **[docs/peripherals.md](docs/peripherals.md)**. Two SSR-25DA: lamps **GPIO26**, fan **GPIO27**; control **3–32 V DC**, load **24–380 V AC / 25 A** class; heat-sink; both default **off**. Fan turns on with the lamps and stays on **30 s** after lamp-off (reset still forces both off).
 
 ### Low-voltage power (5 V)
 
@@ -127,41 +127,60 @@ Arduino IDE *could* target this board, but the preferred workflow is a **Unix te
 - Cross-compiler for ESP32 firmware
 - Flash / serial tooling over the board’s **USB** connector (e.g. `esptool` and a serial monitor)
 
-Exact SDK (ESP-IDF, PlatformIO CLI, etc.) is TBD; keep builds and flash steps runnable from the shell.
+Product firmware is **ESP-IDF** under `esp32_firmware/`; Arduino sketches remain optional for bring-up only.
 
 ## Firmware trees
 
 | Path | Role |
 |------|------|
-| [`docs/toolchain.md`](docs/toolchain.md) | Arduino under the hood, ESP-IDF, comparison, recommendations |
+| [`docs/toolchain.md`](docs/toolchain.md) | Arduino vs ESP-IDF, CLI, flash |
 | [`arduino_test_firmware/`](arduino_test_firmware/) | **mise + arduino-cli** bring-up sketches (optional) |
-| [`esp32_firmware/`](esp32_firmware/) | **ESP-IDF** product baseline (`idf.py`) |
+| [`esp32_firmware/apps/session_timer`](esp32_firmware/apps/session_timer/) | **Product UI**: entry, countdown, clock, users, therapy, exposure log |
+| [`esp32_firmware/apps/wifi_connect`](esp32_firmware/apps/wifi_connect/) | Wi‑Fi + discovery bring-up |
+| [`server/`](server/) | Rails 8: devices, users, exposures, UDP discovery |
+| [`docs/features/`](docs/features/) | Gherkin product contracts |
 | [`conversation-with-grok.md`](conversation-with-grok.md) | Session notes / decision log |
 
 ```bash
 # Shared firmware CLI
 ./scripts/fw arduino setup
-./scripts/fw arduino upload blink      # or led_off, hello_serial, …
+./scripts/fw arduino upload blink
 ./scripts/fw idf install               # once (large)
 ./scripts/fw idf list
-./scripts/fw idf upload wifi_scan      # or blink; multi-app under esp32_firmware/apps/
-./scripts/fw idf monitor wifi_scan
+./scripts/fw idf upload session_timer  # product app
+./scripts/fw idf monitor session_timer
 ./scripts/fw port
 
 # Host helpers / Wi‑Fi secrets
-./scripts/export-known-wifi.sh         # known SSIDs → known_wifi.yaml (no passwords)
+./scripts/export-known-wifi.sh
 cp secrets/wifi.yaml.example secrets/wifi.yaml   # edit passwords (gitignored)
-./scripts/fw idf nvs-wifi              # first network → device NVS
+./scripts/fw idf nvs-wifi
 ./scripts/fw idf upload wifi_connect   # connect + DHCP + SNTP + UDP discovery
+
+# Rails (LAN server + UDP 3000)
+cd server && bin/setup && bin/rails db:seed && bin/rails server -b 0.0.0.0 -p 3000
 ```
 
-Wi‑Fi / NVS: [docs/wifi-config.md](docs/wifi-config.md).  
-ESP ↔ Rails discovery (UDP 3000, UFW, Devices UI): [docs/device-discovery.md](docs/device-discovery.md).  
-Rails app: [server/README.md](server/README.md).
+| Topic | Doc |
+|-------|-----|
+| Wi‑Fi / NVS | [docs/wifi-config.md](docs/wifi-config.md) |
+| ESP ↔ Rails UDP | [docs/device-discovery.md](docs/device-discovery.md) |
+| Pin map / harness | [docs/wiring.md](docs/wiring.md) |
+| Rails app | [server/README.md](server/README.md) |
+| Timer behavior (Gherkin) | [docs/features/session_timer.feature](docs/features/session_timer.feature) |
 
 ## Status
 
-Early stage — dual toolchain, external-antenna board bring-up, Rails Device discovery on the LAN. Next: product UI / session features on top of discovery.
+Working LAN stack and session UI (early product, not medical dosing):
+
+| Area | Current behavior |
+|------|------------------|
+| **session_timer** | MMSS entry (default **00:30**), `#` start / `*` clear or abort, idle clock |
+| **Displays** | LCD: user + time top, date bottom in clock mode; TM1637: wall clock or countdown |
+| **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (default **30 s**) |
+| **Lamp / fan** | Lamps **GPIO26** + LED **GPIO2**; fan **GPIO27** on with lamps, **30 s** rundown after off |
+| **Exposure log** | Lamp-off UDP → Rails `Exposure` under `/users/:id/exposures` |
+| **Rails** | Auth, devices, users, exposures; UDP ping/pong/users/therapy/exposure |
 
 ## Remotes
 

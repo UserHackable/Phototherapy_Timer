@@ -1,0 +1,27 @@
+<%= form_with(model: [ user, exposure ]) do |form| %>
+  <% if exposure.errors.any? %>
+    <div style="color: red">
+      <h2><%= pluralize(exposure.errors.count, "error") %> prohibited this exposure from being saved:</h2>
+
+      <ul>
+        <% exposure.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :started_at, "Timer started", style: "display: block" %>
+    <%= form.datetime_field :started_at %>
+  </div>
+
+  <div>
+    <%= form.label :duration_seconds, "Light on (seconds)", style: "display: block" %>
+    <%= form.number_field :duration_seconds, min: 1, step: 1 %>
+  </div>
+
+  <div>
+    <%= form.submit %>
+  </div>
+<% end %>

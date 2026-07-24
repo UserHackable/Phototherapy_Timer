@@ -1,0 +1,21 @@
+<div id="<%= dom_id exposure %>">
+  <div>
+    <strong>User:</strong>
+    <%= exposure.user.name %>
+  </div>
+
+  <div>
+    <strong>Started at:</strong>
+    <%= l(exposure.started_at, format: :long) if exposure.started_at %>
+  </div>
+
+  <div>
+    <strong>Duration:</strong>
+    <%= exposure.duration_mmss %> (<%= exposure.duration_seconds %>s)
+  </div>
+
+  <div>
+    <strong>Ended at:</strong>
+    <%= l(exposure.ended_at, format: :long) if exposure.ended_at %>
+  </div>
+</div>

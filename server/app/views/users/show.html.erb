@@ -1,0 +1,18 @@
+<p style="color: green"><%= notice %></p>
+
+<% content_for :title, @user.name %>
+
+<h1><%= @user.name %></h1>
+
+<p>
+  <strong>Email:</strong>
+  <%= @user.email_address %>
+</p>
+
+<p>
+  <strong>Exposures:</strong>
+  <%= @user.exposures.count %>
+  — <%= link_to "View log", user_exposures_path(@user) %>
+</p>
+
+<%= link_to "All users", users_path %>

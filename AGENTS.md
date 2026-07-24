@@ -15,7 +15,8 @@ Custom **UserHackable** timer / controller for a failed stock timer on a SolRx E
 | Goal | First **duplicate stock timer behavior**, then add convenience (schedules, safety limits, status, session / health logging) |
 | Use | Household UV phototherapy for eczema (several people) |
 | Why this unit | Solarc [right to repair](https://solarcsystems.com/right-to-repair/); serviceable internals (mostly Wago connectors) |
-| Status | Early stage — scaffold only; fault localized to timer circuit |
+| Status | Early product: `session_timer` UI + Rails discovery/exposures; fault was stock timer circuit |
+
 
 Manufacturer timer replacement exists; this repo deliberately replaces the failed timer with a custom controller and extended features. Stock diagnosis and the full parts list live in [README.md](README.md).
 
@@ -24,7 +25,7 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 | Role | Part |
 |------|------|
 | MCU | ESP32 Type-C **38-pin narrow** + screw terminals ([B0C8DBN29X](https://www.amazon.com/dp/B0C8DBN29X)) — DevKitC pinout; docs: [docs/esp32-board.md](docs/esp32-board.md); default I²C **SDA=21 SCL=22** |
-| Lamps + fan | SSR-25DA ×2 ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — lamps **GPIO26**, fan **GPIO27**; **mains hazard**; [docs/wiring.md](docs/wiring.md), [docs/peripherals.md](docs/peripherals.md) |
+| Lamps + fan | SSR-25DA ×2 ([B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G)) — lamps **GPIO26**, fan **GPIO27** (on with lamps, **30 s** rundown); **mains hazard**; [docs/wiring.md](docs/wiring.md) |
 | Input | 4×4 keypad + PCF8574 I²C ([B0G2KZW8KX](https://www.amazon.com/dp/B0G2KZW8KX)); [docs/keypad-i2c.md](docs/keypad-i2c.md); address ≠ LCD |
 | Text UI | I²C LCD1602 — HD44780 + **PCF8574AT**; [docs/lcd1602-i2c.md](docs/lcd1602-i2c.md); often **0x3F** ([B0FGD3V29S](https://www.amazon.com/dp/B0FGD3V29S)) |
 | Clock / countdown | Prefer **TM1637** 4-digit (**CLK+DIO**, not I²C) ([B0F8PWZK71](https://www.amazon.com/dp/B0F8PWZK71)); [docs/seven-segment-display.md](docs/seven-segment-display.md); alt bare tube w/ DPs ([B07GTRQYMV](https://www.amazon.com/dp/B07GTRQYMV)) |

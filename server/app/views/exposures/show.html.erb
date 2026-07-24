@@ -1,0 +1,12 @@
+<p style="color: green"><%= notice %></p>
+
+<% content_for :title, "Exposure ##{@exposure.id}" %>
+
+<%= render @exposure %>
+
+<div>
+  <%= link_to "Edit", edit_user_exposure_path(@user, @exposure) %> |
+  <%= link_to "Back to exposures", user_exposures_path(@user) %>
+
+  <%= button_to "Destroy this exposure", [ @user, @exposure ], method: :delete %>
+</div>

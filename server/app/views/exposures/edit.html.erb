@@ -1,0 +1,12 @@
+<% content_for :title, "Edit exposure" %>
+
+<h1>Editing exposure for <%= @user.name %></h1>
+
+<%= render "form", exposure: @exposure, user: @user %>
+
+<br>
+
+<div>
+  <%= link_to "Show", [ @user, @exposure ] %> |
+  <%= link_to "Back to exposures", user_exposures_path(@user) %>
+</div>

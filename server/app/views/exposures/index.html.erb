@@ -1,0 +1,38 @@
+<p style="color: green"><%= notice %></p>
+
+<% content_for :title, "#{@user.name} — exposures" %>
+
+<h1>Exposures for <%= link_to @user.name, @user %></h1>
+
+<div id="exposures">
+  <% if @exposures.any? %>
+    <table>
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>Duration</th>
+          <th>Ended</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @exposures.each do |exposure| %>
+          <tr id="<%= dom_id exposure %>">
+            <td><%= l(exposure.started_at, format: :long) if exposure.started_at %></td>
+            <td><%= exposure.duration_mmss %> (<%= exposure.duration_seconds %>s)</td>
+            <td><%= l(exposure.ended_at, format: :long) if exposure.ended_at %></td>
+            <td><%= link_to "Show", [ @user, exposure ] %></td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% else %>
+    <p>No exposures recorded yet.</p>
+  <% end %>
+</div>
+
+<p>
+  <%= link_to "New exposure", new_user_exposure_path(@user) %>
+  |
+  <%= link_to "Back to user", @user %>
+</p>

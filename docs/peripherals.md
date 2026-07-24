@@ -6,7 +6,7 @@ Lighter notes for non-UI parts. **System wiring map:** [wiring.md](wiring.md). F
 
 Product: [Amazon B0CBS8817G](https://www.amazon.com/dp/B0CBS8817G) — BlueStars **SSR-25DA**, pack of 2.
 
-Use **two** modules: one for **UV lamps / ballasts**, one for the **cooling fan**, so the fan can run a few seconds after the lamps turn off.
+Use **two** modules: one for **UV lamps / ballasts**, one for the **cooling fan**. Firmware turns the fan on with the lamps and leaves it on for **30 seconds** after lamp-off.
 
 | Item | Spec (listing) |
 |------|----------------|
@@ -36,7 +36,7 @@ Use **two** modules: one for **UV lamps / ballasts**, one for the **cooling fan*
 | Role | Pin | Intent |
 |------|-----|--------|
 | SSR **lamps** | **GPIO26** | UV ballasts; active high; fail-off |
-| SSR **fan** | **GPIO27** | Cooling fan; active high; fail-off; may lag lamps off |
+| SSR **fan** | **GPIO27** | Cooling fan; active high; fail-off; **30 s** after lamp-off |
 
 See [wiring.md](wiring.md) for the full harness diagram.
 

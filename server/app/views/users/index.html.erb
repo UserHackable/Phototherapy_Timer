@@ -1,0 +1,26 @@
+<p style="color: green"><%= notice %></p>
+
+<% content_for :title, "Users" %>
+
+<h1>Users</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Email</th>
+      <th>Exposures</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @users.each do |user| %>
+      <tr>
+        <td><%= user.id %></td>
+        <td><%= link_to user.name, user %></td>
+        <td><%= user.email_address %></td>
+        <td><%= link_to user.exposures.count, user_exposures_path(user) %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
