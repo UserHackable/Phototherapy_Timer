@@ -34,6 +34,34 @@ Per-module notes: [peripherals.md](peripherals.md), [lcd1602-i2c.md](lcd1602-i2c
 
 Good general outputs still free: **GPIO4, 5, 13, 14, 15, 16, 17, 19, 32, 33** (watch strapping on 0/2/12/15). Avoid **6–11** (flash). **34–39** input-only.
 
+## ESP32 module headers (left / right, top → bottom)
+
+Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at the top**. Left = Espressif **J2**; right = **J3**. Silk is the board label; **This build** is the project assignment (blank = free / unused).
+
+| # | Left silk | Left this build | Right silk | Right this build |
+|---|-----------|-----------------|------------|------------------|
+| 1 | **3V3** | Logic 3.3 V rail (optional out) | **GND** | Common ground |
+| 2 | **EN** | Reset (button / CHIP_PU) | **23** | **TM1637 DIO** |
+| 3 | **VP** (GPIO36) | — (input only) | **22** | **I²C SCL** (LCD + keypad) |
+| 4 | **VN** (GPIO39) | — (input only) | **TX** (GPIO1) | USB serial to PC — leave free |
+| 5 | **34** | — (input only) | **RX** (GPIO3) | USB serial from PC — leave free |
+| 6 | **35** | — (input only) | **21** | **I²C SDA** (LCD + keypad) |
+| 7 | **32** | — | **GND** | Common ground |
+| 8 | **33** | — | **19** | — |
+| 9 | **25** | **Piezo** | **18** | **TM1637 CLK** |
+| 10 | **26** | **SSR lamps** (active HIGH) | **5** | — |
+| 11 | **27** | **SSR fan** (active HIGH) | **17** | — |
+| 12 | **14** | — | **16** | — |
+| 13 | **12** | — (strapping; avoid if possible) | **4** | — |
+| 14 | **GND** | Common ground | **0** | BOOT strapping — leave free |
+| 15 | **13** | — | **2** | **Status LED** (optional; lamps only) |
+| 16 | **D2** (GPIO9) | Flash — do not use | **15** | — (strapping) |
+| 17 | **D3** (GPIO10) | Flash — do not use | **D1** (GPIO8) | Flash — do not use |
+| 18 | **CMD** (GPIO11) | Flash — do not use | **D0** (GPIO7) | Flash — do not use |
+| 19 | **5V** | 5 V from USB / charger (logic supply) | **CLK** (GPIO6) | Flash — do not use |
+
+**In use (summary):** I²C on **21/22**, TM1637 on **18/23**, piezo **25**, SSR lamps **26**, SSR fan **27**, optional LED **2**, power on **5V** / **3V3** / **GND**.
+
 ## Block diagram
 
 ```mermaid
@@ -154,3 +182,4 @@ Confirm SSR terminal silk and ballast wiring against the stock unit before energ
 | Date | Change |
 |------|--------|
 | 2026-07-23 | Initial wiring diagram: pin budget, mermaid + ASCII, dual SSR (lamps 26 / fan 27) |
+| 2026-07-23 | Left/right ESP header table with per-pin project assignments |
