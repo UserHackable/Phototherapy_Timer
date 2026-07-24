@@ -147,7 +147,7 @@ All UI modules stay on **0.1″ headers + female Dupont** for v1 ([front-panel.m
 | SSR lamps control | **+** / **−** (DC input) | GPIO26 → **+**, GND → **−** |
 | SSR fan control | **+** / **−** | GPIO27 → **+**, GND → **−** |
 
-Bench harness colors: see table above (GND black, +5 V red, SSR lamps white, SSR fan grey, TM1637 DIO blue / CLK green). Pin numbers win if a lead is re-colored.
+Bench harness colors: see table above (GND black, +5 V red, I²C SDA orange / SCL yellow, SSR lamps white, SSR fan grey, TM1637 DIO blue / CLK green). Pin numbers win if a lead is re-colored.
 
 ## SSR lamps vs SSR fan
 
@@ -197,3 +197,4 @@ Confirm SSR terminal silk and ballast wiring against the stock unit before energ
 | 2026-07-23 | Initial wiring diagram: pin budget, mermaid + ASCII, dual SSR (lamps 26 / fan 27) |
 | 2026-07-23 | Left/right ESP header table with per-pin project assignments |
 | 2026-07-24 | Harness colors + right-side pin #s 20–38; column order use/silk/…/silk/use |
+| 2026-07-24 | Restore I²C harness colors (SDA orange, SCL yellow) in header table |
