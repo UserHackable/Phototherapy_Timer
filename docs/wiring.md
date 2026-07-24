@@ -38,27 +38,27 @@ Good general outputs still free: **GPIO4, 5, 13, 14, 15, 16, 17, 19, 32, 33** (w
 
 Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at the top**. Left = Espressif **J2**; right = **J3**. Silk is the board label; **This build** is the project assignment (blank = free / unused).
 
-| # | Left silk | Left this build | Right silk | Right this build |
-|---|-----------|-----------------|------------|------------------|
-| 1 | **3V3** | Logic 3.3 V rail (optional out) | **GND** | Common ground |
-| 2 | **EN** | Reset (button / CHIP_PU) | **23** | **TM1637 DIO** |
-| 3 | **VP** (GPIO36) | — (input only) | **22** | **I²C SCL** (LCD + keypad) |
-| 4 | **VN** (GPIO39) | — (input only) | **TX** (GPIO1) | USB serial to PC — leave free |
-| 5 | **34** | — (input only) | **RX** (GPIO3) | USB serial from PC — leave free |
-| 6 | **35** | — (input only) | **21** | **I²C SDA** (LCD + keypad) |
-| 7 | **32** | — | **GND** | Common ground |
-| 8 | **33** | — | **19** | — |
-| 9 | **25** | **Piezo** | **18** | **TM1637 CLK** |
-| 10 | **26** | **SSR lamps** (active HIGH) | **5** | — |
-| 11 | **27** | **SSR fan** (active HIGH) | **17** | — |
-| 12 | **14** | — | **16** | — |
-| 13 | **12** | — (strapping; avoid if possible) | **4** | — |
-| 14 | **GND** | Common ground | **0** | BOOT strapping — leave free |
-| 15 | **13** | — | **2** | **Status LED** (optional; lamps only) |
-| 16 | **D2** (GPIO9) | Flash — do not use | **15** | — (strapping) |
-| 17 | **D3** (GPIO10) | Flash — do not use | **D1** (GPIO8) | Flash — do not use |
-| 18 | **CMD** (GPIO11) | Flash — do not use | **D0** (GPIO7) | Flash — do not use |
-| 19 | **5V** | 5 V from USB / charger (logic supply) | **CLK** (GPIO6) | Flash — do not use |
+| # | Left this build | Left silk |  | Right silk | Right this build |
+|---|-----------------|-----------|:-:|------------|------------------|
+| 1 | Logic 3.3 V rail (optional out) | **3V3** | … | **GND** | Common ground |
+| 2 | Reset (button / CHIP_PU) | **EN** | … | **23** | **TM1637 DIO** |
+| 3 | — (input only) | **VP** (GPIO36) | … | **22** | **I²C SCL** (LCD + keypad) |
+| 4 | — (input only) | **VN** (GPIO39) | … | **TX** (GPIO1) | USB serial to PC — leave free |
+| 5 | — (input only) | **34** | … | **RX** (GPIO3) | USB serial from PC — leave free |
+| 6 | — (input only) | **35** | … | **21** | **I²C SDA** (LCD + keypad) |
+| 7 | — | **32** | … | **GND** | Common ground |
+| 8 | — | **33** | … | **19** | — |
+| 9 | **Piezo** | **25** | … | **18** | **TM1637 CLK** |
+| 10 | **SSR lamps** (active HIGH) | **26** | … | **5** | — |
+| 11 | **SSR fan** (active HIGH) | **27** | … | **17** | — |
+| 12 | — | **14** | … | **16** | — |
+| 13 | — (strapping; avoid if possible) | **12** | … | **4** | — |
+| 14 | Common ground | **GND** | … | **0** | BOOT strapping — leave free |
+| 15 | — | **13** | … | **2** | **Status LED** (optional; lamps only) |
+| 16 | Flash — do not use | **D2** (GPIO9) | … | **15** | — (strapping) |
+| 17 | Flash — do not use | **D3** (GPIO10) | … | **D1** (GPIO8) | Flash — do not use |
+| 18 | Flash — do not use | **CMD** (GPIO11) | … | **D0** (GPIO7) | Flash — do not use |
+| 19 | 5 V from USB / charger (logic supply) | **5V** | … | **CLK** (GPIO6) | Flash — do not use |
 
 **In use (summary):** I²C on **21/22**, TM1637 on **18/23**, piezo **25**, SSR lamps **26**, SSR fan **27**, optional LED **2**, power on **5V** / **3V3** / **GND**.
 
