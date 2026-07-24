@@ -44,6 +44,8 @@ Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at t
 |-------|-----|
 | **Black** | GND |
 | **Red** | +5 V |
+| **Orange** | I²C SDA (GPIO21) |
+| **Yellow** | I²C SCL (GPIO22) |
 | **White** | SSR lamps (GPIO26) |
 | **Grey** | SSR fan (GPIO27) |
 | **Blue** | TM1637 DIO (GPIO23) |
@@ -53,10 +55,10 @@ Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at t
 |----:|-------|-----------------|-----------|:-:|------------|------------------|-------|----:|
 | 1 | — | Logic 3.3 V rail (optional out) | **3V3** | … | **GND** | Common ground | **Black** | 20 |
 | 2 | — | Reset (button / CHIP_PU) | **EN** | … | **23** | **TM1637 DIO** | **Blue** | 21 |
-| 3 | — | — (input only) | **VP** (GPIO36) | … | **22** | **I²C SCL** (LCD + keypad) | — | 22 |
+| 3 | — | — (input only) | **VP** (GPIO36) | … | **22** | **I²C SCL** (LCD + keypad) | **Yellow** | 22 |
 | 4 | — | — (input only) | **VN** (GPIO39) | … | **TX** (GPIO1) | USB serial to PC — leave free | — | 23 |
 | 5 | — | — (input only) | **34** | … | **RX** (GPIO3) | USB serial from PC — leave free | — | 24 |
-| 6 | — | — (input only) | **35** | … | **21** | **I²C SDA** (LCD + keypad) | — | 25 |
+| 6 | — | — (input only) | **35** | … | **21** | **I²C SDA** (LCD + keypad) | **Orange** | 25 |
 | 7 | — | — | **32** | … | **GND** | Common ground | **Black** | 26 |
 | 8 | — | — | **33** | … | **19** | — | — | 27 |
 | 9 | — | **Piezo** | **25** | … | **18** | **TM1637 CLK** | **Green** | 28 |
@@ -71,7 +73,7 @@ Orientation matches the board and [esp32-board.md](esp32-board.md): **USB-C at t
 | 18 | — | Flash — do not use | **CMD** (GPIO11) | … | **D0** (GPIO7) | Flash — do not use | — | 37 |
 | 19 | **Red** | 5 V from USB / charger (logic supply) | **5V** | … | **CLK** (GPIO6) | Flash — do not use | — | 38 |
 
-**In use (summary):** I²C on **21/22**, TM1637 on **18/23** (green/blue), piezo **25**, SSR lamps **26** (white), SSR fan **27** (grey), optional LED **2**, power **5V** red / **GND** black.
+**In use (summary):** I²C **21/22** (orange/yellow), TM1637 **18/23** (green/blue), piezo **25**, SSR lamps **26** (white), SSR fan **27** (grey), optional LED **2**, power **5V** red / **GND** black.
 
 ## Block diagram
 
