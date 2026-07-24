@@ -43,6 +43,15 @@ static const char *TAG = "wifi_connect";
 /* US/Mountain (matches host timedatectl on this project machine). */
 #define TZ_POSIX "MST7MDT,M3.2.0,M11.1.0"
 
+/*
+ * Prefer the LAN chrony/NTP host (Omarchy build PC), then public pools.
+ * IP was 192.168.1.163 on this network — reserve it on the router if it
+ * moves, or change SNTP_SERVER_LAN below.
+ */
+#define SNTP_SERVER_LAN   "192.168.1.163"
+#define SNTP_SERVER_FALLBACK0 "pool.ntp.org"
+#define SNTP_SERVER_FALLBACK1 "time.google.com"
+
 #define PRINT_PERIOD_MS        (60 * 1000)
 #define SNTP_PERIOD_US         (6LL * 60 * 60 * 1000000LL) /* 6 hours */
 #define SNTP_WAIT_MAX_RETRIES  30
@@ -160,8 +169,11 @@ static void sntp_ensure_started(void)
     setenv("TZ", TZ_POSIX, 1);
     tzset();
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
-    esp_sntp_setservername(1, "time.google.com");
+    esp_sntp_setservername(0, SNTP_SERVER_LAN);
+    esp_sntp_setservername(1, SNTP_SERVER_FALLBACK0);
+    esp_sntp_setservername(2, SNTP_SERVER_FALLBACK1);
+    ESP_LOGI(TAG, "SNTP servers: %s, %s, %s",
+             SNTP_SERVER_LAN, SNTP_SERVER_FALLBACK0, SNTP_SERVER_FALLBACK1);
     /* Do not auto-poll forever at library default only — we drive refresh ourselves. */
     esp_sntp_init();
     s_sntp_started = true;

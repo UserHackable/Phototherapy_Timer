@@ -1,0 +1,9 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  identity: esp-one
+  ip: 192.168.1.10
+
+two:
+  identity: esp-two
+  ip: 192.168.1.11

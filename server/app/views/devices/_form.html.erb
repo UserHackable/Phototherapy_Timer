@@ -1,0 +1,27 @@
+<%= form_with(model: device) do |form| %>
+  <% if device.errors.any? %>
+    <div style="color: red">
+      <h2><%= pluralize(device.errors.count, "error") %> prohibited this device from being saved:</h2>
+
+      <ul>
+        <% device.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :identity, style: "display: block" %>
+    <%= form.text_field :identity %>
+  </div>
+
+  <div>
+    <%= form.label :ip, style: "display: block" %>
+    <%= form.text_field :ip %>
+  </div>
+
+  <div>
+    <%= form.submit %>
+  </div>
+<% end %>
