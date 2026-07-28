@@ -223,7 +223,7 @@ Feature: Session timer entry and countdown
     Then the UI is in clock mode
     And the TM1637 shows wall clock HH:MM
     And the LCD top line shows the selected user (or Guest) left and session time right
-    And the LCD bottom line shows the calendar date
+    And the LCD bottom line shows the calendar date with A or P (AM/PM) in the last column
 
   Scenario: Idle timeout does not apply while counting down
     Given a session is running

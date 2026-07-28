@@ -4,7 +4,7 @@
  * Phototherapy-style session UI + wall clock:
  *   - Digits enter MMSS (134 → 1:34, 45 → 0:45); # start; * clear / abort
  *   - TM1637: MM:SS in timer modes; HH:MM wall clock in clock mode
- *   - LCD clock mode: date | bottom-left time + bottom-right requested
+ *   - LCD clock mode: date + A/P (AM/PM) on bottom; user + session time on top
  *   - 60 s idle (not while running) → clock mode; any key wakes timer UI
  *   - Lamp: SSR GPIO26 + blue LED GPIO2; fan SSR GPIO27 (30 s rundown after lamp off)
  *   - Piezo end beep GPIO25
@@ -63,7 +63,7 @@ static const char *TAG = "session_timer";
 #define PIEZO_GPIO    25
 
 #define BEEP_FREQ_HZ  2000
-#define BEEP_MS       200
+#define BEEP_MS       1000
 /** Fan stays on this long after lamps turn off. */
 #define FAN_RUNDOWN_MS  30000
 
@@ -1398,10 +1398,11 @@ static void ui_entry_refresh(void)
     char l0[17], l1[17];
     /* Top: selected user (or Guest) left, programmed time right. */
     format_user_time_line(l0, sizeof(l0), mm, sec_show);
+    /* * left / # right — matches keypad sides; full 16 cols */
     if (s_after_complete && (s_entry_digits > 0 || s_entry > 0)) {
-        snprintf(l1, sizeof(l1), "# repeat * clr");
+        snprintf(l1, sizeof(l1), "* clear repeat #");
     } else {
-        snprintf(l1, sizeof(l1), "# start * clear");
+        snprintf(l1, sizeof(l1), "* clear  start #");
     }
     lcd_status(l0, l1);
 }
@@ -1416,7 +1417,8 @@ static void ui_running_refresh(void)
     char l0[17], l1[17];
     /* Keep selected user on top; remaining countdown on the right. */
     format_user_time_line(l0, sizeof(l0), mm, ss);
-    snprintf(l1, sizeof(l1), "Running * abort");
+    /* * left — matches keypad; full 16 cols */
+    snprintf(l1, sizeof(l1), "* abort  Running");
     lcd_status(l0, l1);
 }
 
@@ -1434,10 +1436,12 @@ static void ui_clock_refresh(void)
     int sec_show = ss > 59 ? 59 : ss;
     format_user_time_line(l0, sizeof(l0), mm, sec_show);
 
-    /* Bottom: calendar date, or offline note. */
+    /* Bottom: calendar date + A/P (AM/PM) in last column, or offline note. */
     if (valid) {
-        /* "2026-07-24 Fri" fits 16 cols */
-        strftime(l1, sizeof(l1), "%Y-%m-%d %a", &t);
+        /* "YYYY-MM-DD Www" is 14 cols; pad so A/P is column 16 */
+        char dbuf[16];
+        strftime(dbuf, sizeof(dbuf), "%Y-%m-%d %a", &t);
+        snprintf(l1, sizeof(l1), "%-15s%c", dbuf, (t.tm_hour < 12) ? 'A' : 'P');
     } else {
         snprintf(l1, sizeof(l1), "No network time");
     }
