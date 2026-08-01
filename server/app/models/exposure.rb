@@ -19,4 +19,18 @@ class Exposure < ApplicationRecord
     mm, ss = duration_seconds.divmod(60)
     format("%d:%02d", mm, ss)
   end
+
+  def now
+    Time.zone.now
+  end
+
+  def age
+    ActiveSupport::Duration.build(now - started_at)
+  end
+
+  class << self
+    def latest
+      newest_first.first
+    end
+  end
 end

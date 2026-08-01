@@ -21,6 +21,24 @@ Puma serves **HTTP on TCP 3000**. On boot it also starts **UDP discovery on
 port 3000** (same number, different protocol). Time zone: **Mountain Time
 (US & Canada)** (`config.time_zone`); pong includes `tz` / `tz_posix` for the module.
 
+## Production host (`ami`)
+
+LAN deploy target: **ami** at `192.168.1.202` (Arch + Docker + Kamal via
+[arch-rails-server](https://github.com/Ruby-on-Rails-Wizardry/arch-rails-server)).
+
+| | |
+|--|--|
+| UI | `http://phototherapy.ami.lan` |
+| SSH | `rob@ami` (login), `deploy@ami` (Kamal) |
+| Config | [`config/deploy.yml`](config/deploy.yml) |
+| Guide | [`docs/deploy-ami.md`](docs/deploy-ami.md) |
+
+```bash
+# once DNS/hosts points phototherapy.ami.lan → 192.168.1.202
+bin/kamal setup
+bin/kamal deploy
+```
+
 ## Authentication
 
 Rails 8 `generate authentication`:

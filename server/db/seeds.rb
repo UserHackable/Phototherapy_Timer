@@ -15,8 +15,8 @@ rows = YAML.safe_load_file(users_path, permitted_classes: [], aliases: false)
 raise "db/data/users.yaml must be a list of user hashes" unless rows.is_a?(Array)
 
 rows.each_with_index do |row, index|
-  name = row.fetch("name").to_s.strip.downcase
-  email = "#{name}@ferney.org"
+  name = row.fetch("name").to_s.strip
+  email = "#{name.downcase}@ferney.org"
 
   user = User.find_or_initialize_by(email_address: email)
   user.name = name
