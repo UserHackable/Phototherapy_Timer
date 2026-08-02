@@ -3,9 +3,9 @@
 LAN over-the-air firmware updates for product apps so an installed module does
 not need USB access for routine upgrades.
 
-Status: **partition table + `uh_ota` component + `ota_smoke` app landed**.
-Rails publish / `session_timer` integration still TODO. Product updates for
-now still use `./scripts/fw idf upload <app>` until publish is automated.
+Status: **dual-OTA partitions + `uh_ota` + `ota_smoke` + Rails publish proven
+on hardware** (SHA-256 OK, reboot into new slot). `session_timer` product
+integration (safety gates) is next.
 
 ## Why
 

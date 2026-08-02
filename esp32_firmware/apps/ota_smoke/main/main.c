@@ -150,19 +150,30 @@ void app_main(void)
         return;
     }
 
-    char base[48];
-    snprintf(base, sizeof(base), "http://%s", s_server_ip);
+    /* Stable a few seconds so rollback window can mark valid before OTA work. */
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    uh_ota_mark_valid();
 
-    uh_ota_config_t ota_cfg = {
-        .base_url = base,
-        .app_name = "ota_smoke",
-        .may_start = NULL,
-        .skip_if_same_version = true,
-    };
+    char *base = malloc(48);
+    if (!base) {
+        ESP_LOGE(TAG, "oom");
+        return;
+    }
+    snprintf(base, 48, "http://%s", s_server_ip);
+
+    uh_ota_config_t *ota_cfg = calloc(1, sizeof(*ota_cfg));
+    if (!ota_cfg) {
+        free(base);
+        return;
+    }
+    ota_cfg->base_url = base;
+    ota_cfg->app_name = "ota_smoke";
+    ota_cfg->may_start = NULL;
+    ota_cfg->skip_if_same_version = true;
 
     for (;;) {
         ESP_LOGI(TAG, "OTA check against %s", base);
-        esp_err_t err = uh_ota_check_and_update(&ota_cfg);
+        esp_err_t err = uh_ota_check_and_update(ota_cfg);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "up to date (or no change)");
         } else {

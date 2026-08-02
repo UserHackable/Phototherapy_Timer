@@ -53,11 +53,14 @@ static esp_err_t http_get_body(const char *url, char *out, size_t out_len, int *
         .url = url,
         .timeout_ms = HTTP_TIMEOUT_MS,
         .method = HTTP_METHOD_GET,
+        .disable_auto_redirect = false,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
         return ESP_ERR_NO_MEM;
     }
+    /* Proxy/CDN may gzip otherwise — OTA image must be raw. */
+    esp_http_client_set_header(client, "Accept-Encoding", "identity");
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -128,6 +131,7 @@ static esp_err_t download_and_apply(const char *bin_url, const char *expect_sha2
     if (!client) {
         return ESP_ERR_NO_MEM;
     }
+    esp_http_client_set_header(client, "Accept-Encoding", "identity");
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -136,8 +140,9 @@ static esp_err_t download_and_apply(const char *bin_url, const char *expect_sha2
         return err;
     }
 
-    (void)esp_http_client_fetch_headers(client);
+    int content_length = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "bin HTTP %d content_length=%d", status, content_length);
     if (status != 200) {
         ESP_LOGE(TAG, "bin HTTP %d", status);
         esp_http_client_close(client);
@@ -266,14 +271,22 @@ esp_err_t uh_ota_check_and_update(const uh_ota_config_t *cfg)
     ESP_LOGI(TAG, "running version=%s", uh_ota_running_version());
     ESP_LOGI(TAG, "manifest %s", manifest_url);
 
-    char body[MANIFEST_MAX];
+    /* Heap buffer — large stack locals + HTTP client overflow main task. */
+    char *body = malloc(MANIFEST_MAX);
+    if (!body) {
+        return ESP_ERR_NO_MEM;
+    }
     int status = 0;
-    esp_err_t err = http_get_body(manifest_url, body, sizeof(body), &status);
+    esp_err_t err = http_get_body(manifest_url, body, MANIFEST_MAX, &status);
     if (err != ESP_OK) {
+        free(body);
         return err;
     }
+    ESP_LOGI(TAG, "manifest HTTP %d (%u bytes)", status, (unsigned)strlen(body));
 
     cJSON *root = cJSON_Parse(body);
+    free(body);
+    body = NULL;
     if (!root) {
         ESP_LOGE(TAG, "manifest JSON parse failed");
         return ESP_ERR_INVALID_RESPONSE;
@@ -284,19 +297,25 @@ esp_err_t uh_ota_check_and_update(const uh_ota_config_t *cfg)
     const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(root, "url");
     const cJSON *jforce = cJSON_GetObjectItemCaseSensitive(root, "force");
 
-    const char *remote_ver =
-        (cJSON_IsString(jver) && jver->valuestring) ? jver->valuestring : "";
-    const char *sha =
-        (cJSON_IsString(jsha) && jsha->valuestring) ? jsha->valuestring : "";
-    const char *rel_url =
-        (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : "";
+    char remote_ver[32] = {0};
+    char sha[72] = {0};
+    char rel_url[160] = {0};
+    if (cJSON_IsString(jver) && jver->valuestring) {
+        strncpy(remote_ver, jver->valuestring, sizeof(remote_ver) - 1);
+    }
+    if (cJSON_IsString(jsha) && jsha->valuestring) {
+        strncpy(sha, jsha->valuestring, sizeof(sha) - 1);
+    }
+    if (cJSON_IsString(jurl) && jurl->valuestring) {
+        strncpy(rel_url, jurl->valuestring, sizeof(rel_url) - 1);
+    }
     bool force = cJSON_IsTrue(jforce);
+    cJSON_Delete(root);
 
     bool skip_same = cfg->skip_if_same_version;
     if (remote_ver[0] && skip_same && !force &&
         strcmp(remote_ver, uh_ota_running_version()) == 0) {
         ESP_LOGI(TAG, "already at version %s", remote_ver);
-        cJSON_Delete(root);
         return ESP_OK;
     }
 
@@ -314,7 +333,5 @@ esp_err_t uh_ota_check_and_update(const uh_ota_config_t *cfg)
     }
 
     ESP_LOGI(TAG, "update available remote=%s → %s", remote_ver, bin_url);
-    cJSON_Delete(root);
-
-    return download_and_apply(bin_url, sha);
+    return download_and_apply(bin_url, sha[0] ? sha : NULL);
 }

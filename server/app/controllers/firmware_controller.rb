@@ -21,6 +21,9 @@ class FirmwareController < ApplicationController
     path = artifact_path("app.bin")
     return head :not_found unless path
 
+    # Must not be gzip/br compressed — ESP OTA writes raw image bytes.
+    response.headers["Content-Encoding"] = "identity"
+    response.headers["Cache-Control"] = "no-transform"
     send_file path,
               type: "application/octet-stream",
               disposition: "inline",
