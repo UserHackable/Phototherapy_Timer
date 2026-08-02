@@ -10,13 +10,8 @@ servers:
   web:
     hosts:
       - 192.168.1.202
-    # ESP32 UDP discovery (UdpDiscoveryListener) — not handled by kamal-proxy.
-    # Host Docker must use iptables publish (userland-proxy: false) so the
-    # container sees the real ESP LAN IP and pongs route back correctly.
-    # See docs/deploy-ami.md § "UDP discovery / Docker".
-    options:
-      publish:
-        - "3000:3000/udp"
+    # HTTP only via kamal-proxy. UDP discovery is the host-network accessory
+    # below (broadcast + real client IPs). See docs/deploy-ami.md.
 
 # LAN multi-app via kamal-proxy (HTTP on host :80). No Let's Encrypt on LAN.
 # Point clients at phototherapy.ami.lan (or add /etc/hosts → 192.168.1.202).
@@ -36,11 +31,31 @@ env:
     # Run the Solid Queue Supervisor inside the web server's Puma process to do jobs.
     SOLID_QUEUE_IN_PUMA: true
 
-    # Stable identity / IP advertised to ESP32 modules on the LAN.
-    UDP_DISCOVERY_IDENTITY: ami
-    UDP_DISCOVERY_IP: "192.168.1.202"
-    UDP_DISCOVERY_PORT: "3000"
-    # UDP_DISCOVERY: "0"  # set to disable listener
+    # Web process does not bind UDP — accessory `udp_discovery` does (host net).
+    UDP_DISCOVERY: "0"
+
+# UDP JSON discovery on the host network stack so ESP broadcast + unicast both
+# reach the listener and peer addresses stay real LAN IPs (not docker-proxy).
+# Same image/volume as web. After app deploy: bin/kamal accessory reboot udp_discovery
+accessories:
+  udp_discovery:
+    host: 192.168.1.202
+    image: phototherapy_server
+    network: host
+    cmd: 'bin/rails runner "UdpDiscoveryListener.start!; sleep"'
+    env:
+      secret:
+        - RAILS_MASTER_KEY
+      clear:
+        UDP_DISCOVERY: "1"
+        UDP_DISCOVERY_IDENTITY: ami
+        UDP_DISCOVERY_IP: "192.168.1.202"
+        UDP_DISCOVERY_PORT: "3000"
+        RAILS_LOG_LEVEL: info
+    volumes:
+      - "phototherapy_server_storage:/rails/storage"
+    options:
+      restart: unless-stopped
 
 # Aliases are triggered with "bin/kamal <alias>".
 aliases:

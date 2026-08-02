@@ -82,19 +82,14 @@ $EDITOR secrets/wifi.yaml
 On success the log should show **DHCP got ip**, **local time** from SNTP, and
 (when Rails is running) a **discovery PONG** / `server known` line.
 
-### LAN time (SNTP) and discovery host
+### Wall clock and server discovery
 
-`wifi_connect` prefers SNTP servers in this order:
+1. **UDP discovery pong** supplies wall clock + server LAN IP (preferred). No
+   hard-coded host IP in firmware — see [device-discovery.md](device-discovery.md).
+2. **SNTP fallback** (only if discovery has no usable `unix`): public pools
+   `pool.ntp.org` and `time.google.com`.
 
-1. LAN host — `SNTP_SERVER_LAN` in `main.c` (currently `192.168.1.163`)
-2. `pool.ntp.org`
-3. `time.google.com`
-
-Requires `CONFIG_LWIP_SNTP_MAX_SERVERS=3` (set in `sdkconfig.defaults`).
-
-The same LAN IP is the first **unicast** target for UDP device discovery
-(port 3000). Full discovery setup (Rails, UFW, protocol):
-[device-discovery.md](device-discovery.md).
+Requires `CONFIG_LWIP_SNTP_MAX_SERVERS` ≥ 2 (see `sdkconfig.defaults`).
 
 Optional: list SSIDs this PC already knows (no passwords):
 

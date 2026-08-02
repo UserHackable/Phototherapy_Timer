@@ -54,14 +54,9 @@ static const char *TAG = "wifi_connect";
 /* US/Mountain (matches host timedatectl on this project machine). */
 #define TZ_POSIX "MST7MDT,M3.2.0,M11.1.0"
 
-/*
- * Prefer the LAN chrony/NTP host (Omarchy build PC), then public pools.
- * IP was 192.168.1.163 on this network — reserve it on the router if it
- * moves, or change SNTP_SERVER_LAN below.
- */
-#define SNTP_SERVER_LAN   "192.168.1.163"
-#define SNTP_SERVER_FALLBACK0 "pool.ntp.org"
-#define SNTP_SERVER_FALLBACK1 "time.google.com"
+/* Public SNTP only — wall clock prefers UDP discovery pong (no hardcoded LAN IP). */
+#define SNTP_SERVER0  "pool.ntp.org"
+#define SNTP_SERVER1  "time.google.com"
 
 #define PRINT_PERIOD_MS        (60 * 1000)
 #define SNTP_PERIOD_US         (6LL * 60 * 60 * 1000000LL) /* 6 hours */
@@ -73,6 +68,9 @@ static const char *TAG = "wifi_connect";
 #define DISCOVERY_TIMEOUT_MS     2000
 #define DISCOVERY_ATTEMPTS       3
 #define DISCOVERY_PERIOD_MS      (5 * 60 * 1000)
+
+#define NVS_NS_DISC     "discovery"
+#define NVS_KEY_SRV_IP  "server_ip"
 
 static EventGroupHandle_t s_wifi_events;
 static int s_retry;
@@ -87,6 +85,7 @@ static int64_t s_last_discovery_us;
 
 static char s_device_identity[40];
 static char s_server_ip[16];
+static char s_server_ip_hint[16];
 static char s_server_identity[64];
 static bool s_have_server;
 static bool s_time_from_discovery;
@@ -197,11 +196,9 @@ static void sntp_ensure_started(void)
     setenv("TZ", TZ_POSIX, 1);
     tzset();
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, SNTP_SERVER_LAN);
-    esp_sntp_setservername(1, SNTP_SERVER_FALLBACK0);
-    esp_sntp_setservername(2, SNTP_SERVER_FALLBACK1);
-    ESP_LOGI(TAG, "SNTP servers: %s, %s, %s",
-             SNTP_SERVER_LAN, SNTP_SERVER_FALLBACK0, SNTP_SERVER_FALLBACK1);
+    esp_sntp_setservername(0, SNTP_SERVER0);
+    esp_sntp_setservername(1, SNTP_SERVER1);
+    ESP_LOGI(TAG, "SNTP servers (discovery fallback): %s, %s", SNTP_SERVER0, SNTP_SERVER1);
     /* Do not auto-poll forever at library default only — we drive refresh ourselves. */
     esp_sntp_init();
     s_sntp_started = true;
@@ -285,6 +282,39 @@ static void build_device_identity(void)
     ESP_LOGI(TAG, "device identity: %s", s_device_identity);
 }
 
+static void nvs_load_server_ip_hint(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_DISC, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(s_server_ip_hint);
+    if (nvs_get_str(h, NVS_KEY_SRV_IP, s_server_ip_hint, &len) == ESP_OK &&
+        s_server_ip_hint[0] != '\0') {
+        ESP_LOGI(TAG, "discovery hint from NVS: %s", s_server_ip_hint);
+    } else {
+        s_server_ip_hint[0] = '\0';
+    }
+    nvs_close(h);
+}
+
+static void nvs_save_server_ip_hint(const char *ip)
+{
+    if (!ip || !ip[0]) {
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_DISC, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    if (nvs_set_str(h, NVS_KEY_SRV_IP, ip) == ESP_OK) {
+        nvs_commit(h);
+    }
+    nvs_close(h);
+    strncpy(s_server_ip_hint, ip, sizeof(s_server_ip_hint) - 1);
+    s_server_ip_hint[sizeof(s_server_ip_hint) - 1] = '\0';
+}
+
 static bool apply_unix_time(int64_t unix_sec)
 {
     if (unix_sec < 1609459200LL) {
@@ -301,7 +331,7 @@ static bool apply_unix_time(int64_t unix_sec)
     return true;
 }
 
-static bool parse_json_pong(const char *msg)
+static bool parse_json_pong(const char *msg, const char *from_ip)
 {
     cJSON *root = cJSON_Parse(msg);
     if (!root) {
@@ -319,19 +349,21 @@ static bool parse_json_pong(const char *msg)
     const cJSON *tz_posix = cJSON_GetObjectItemCaseSensitive(root, "tz_posix");
     if (cJSON_IsString(ident) && ident->valuestring) {
         strncpy(s_server_identity, ident->valuestring, sizeof(s_server_identity) - 1);
+        s_server_identity[sizeof(s_server_identity) - 1] = '\0';
     }
-    if (cJSON_IsString(ip) && ip->valuestring) {
+    s_server_ip[0] = '\0';
+    if (cJSON_IsString(ip) && ip->valuestring && ip->valuestring[0]) {
         strncpy(s_server_ip, ip->valuestring, sizeof(s_server_ip) - 1);
+        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
+    } else if (from_ip && from_ip[0]) {
+        strncpy(s_server_ip, from_ip, sizeof(s_server_ip) - 1);
+        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
     }
     if (cJSON_IsString(tz_posix) && tz_posix->valuestring && tz_posix->valuestring[0]) {
         setenv("TZ", tz_posix->valuestring, 1);
         tzset();
-        ESP_LOGI(TAG, "TZ from discovery: %s%s%s",
-                 tz_posix->valuestring,
-                 (cJSON_IsString(tz) && tz->valuestring) ? " (" : "",
-                 (cJSON_IsString(tz) && tz->valuestring) ? tz->valuestring : "");
+        ESP_LOGI(TAG, "TZ from discovery: %s", tz_posix->valuestring);
         if (cJSON_IsString(tz) && tz->valuestring) {
-            /* close paren only when name present — keep log simple */
             ESP_LOGI(TAG, "tz name=%s", tz->valuestring);
         }
     }
@@ -411,8 +443,9 @@ static bool discovery_once(void)
 
     {
         ip4_addr_t known;
-        if (ip4addr_aton(SNTP_SERVER_LAN, &known)) {
-            discovery_send(sock, payload, plen, known.addr, "known LAN host");
+        const char *hint = s_server_ip[0] ? s_server_ip : s_server_ip_hint;
+        if (hint[0] && ip4addr_aton(hint, &known)) {
+            discovery_send(sock, payload, plen, known.addr, "last server");
         }
     }
 
@@ -442,16 +475,19 @@ static bool discovery_once(void)
         }
         rx[n] = '\0';
 
-        if (!parse_json_pong(rx)) {
+        char from[16];
+        ip4_addr_t from_a = { .addr = src.sin_addr.s_addr };
+        ip4addr_ntoa_r(&from_a, from, sizeof(from));
+
+        if (!parse_json_pong(rx, from)) {
             continue;
         }
 
         s_have_server = true;
         found = true;
-
-        char from[16];
-        ip4_addr_t from_a = { .addr = src.sin_addr.s_addr };
-        ip4addr_ntoa_r(&from_a, from, sizeof(from));
+        if (s_server_ip[0]) {
+            nvs_save_server_ip_hint(s_server_ip);
+        }
         ESP_LOGI(TAG, "discovery pong from %s: identity=%s ip=%s time_from_disc=%d",
                  from, s_server_identity, s_server_ip, (int)s_time_from_discovery);
         break;
@@ -460,8 +496,8 @@ static bool discovery_once(void)
     close(sock);
 
     if (!found) {
-        ESP_LOGW(TAG, "discovery: no server pong (is Rails on UDP %d at %s?)",
-                 DISCOVERY_PORT, SNTP_SERVER_LAN);
+        ESP_LOGW(TAG, "discovery: no server pong (Rails UDP %d / broadcast?)",
+                 DISCOVERY_PORT);
     }
     return found;
 }
@@ -514,6 +550,7 @@ void app_main(void)
     }
 
     build_device_identity();
+    nvs_load_server_ip_hint();
 
     char ssid[33] = {0};
     char pass[65] = {0};

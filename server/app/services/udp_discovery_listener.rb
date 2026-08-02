@@ -141,13 +141,16 @@ class UdpDiscoveryListener
 
   def handle_ping(parsed, remote_ip)
     identity = parsed[:identity]
+    # Prefer client-reported STA IP when present (survives Docker NAT); reply still uses peer.
+    device_ip = parsed[:ip].presence || remote_ip
     @logger.info(
       "[udp_discovery] ping from #{remote_ip}" \
-      "#{identity ? " identity=#{identity}" : ""}"
+      "#{identity ? " identity=#{identity}" : ""}" \
+      "#{parsed[:ip].present? ? " client_ip=#{parsed[:ip]}" : ""}"
     )
 
     ActiveRecord::Base.connection_pool.with_connection do
-      device = Device.upsert_from_discovery!(ip: remote_ip, identity: identity)
+      device = Device.upsert_from_discovery!(ip: device_ip, identity: identity)
       @logger.info(
         "[udp_discovery] Device##{device.id} ip=#{device.ip}" \
         "#{device.identity.present? ? " identity=#{device.identity}" : ""}"
@@ -302,7 +305,7 @@ class UdpDiscoveryListener
     type = data["type"].to_s.downcase
     case type
     when "ping"
-      { type: :ping, identity: data["identity"].presence, v: data["v"] }
+      { type: :ping, identity: data["identity"].presence, ip: data["ip"].presence, v: data["v"] }
     when "users"
       { type: :users, identity: data["identity"].presence, v: data["v"] }
     when "therapy"

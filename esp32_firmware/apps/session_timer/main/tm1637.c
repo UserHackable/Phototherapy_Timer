@@ -96,8 +96,11 @@ static void tm_stop(tm1637_t *dev)
     delay_half();
 }
 
-/** Write one byte LSB-first; ignore ACK. */
-static void tm_write_byte(tm1637_t *dev, uint8_t b)
+/**
+ * Write one byte LSB-first. Returns true if the chip pulled DIO low for ACK.
+ * Floating/open DIO (no module) usually reads high → no ACK.
+ */
+static bool tm_write_byte(tm1637_t *dev, uint8_t b)
 {
     dio_output(dev);
     for (int i = 0; i < 8; i++) {
@@ -112,21 +115,23 @@ static void tm_write_byte(tm1637_t *dev, uint8_t b)
         delay_half();
         b >>= 1;
     }
-    /* ACK clock: release DIO, pulse CLK */
+    /* ACK clock: release DIO, pulse CLK, sample */
     clk_low(dev);
     dio_input(dev);
     delay_half();
     clk_high(dev);
     delay_half();
+    int ack_level = gpio_get_level(dev->dio_gpio);
     clk_low(dev);
     dio_output(dev);
     delay_half();
+    return ack_level == 0; /* ACK = line pulled low by chip */
 }
 
 static void tm_write_cmd(tm1637_t *dev, uint8_t cmd)
 {
     tm_start(dev);
-    tm_write_byte(dev, cmd);
+    (void)tm_write_byte(dev, cmd);
     tm_stop(dev);
 }
 
@@ -154,6 +159,15 @@ esp_err_t tm1637_init(tm1637_t *dev, int clk_gpio, int dio_gpio)
 
     clk_high(dev);
     dio_high(dev);
+
+    /* Probe: data-command byte should ACK if a TM1637 is wired. */
+    tm_start(dev);
+    bool present = tm_write_byte(dev, 0x40);
+    tm_stop(dev);
+    if (!present) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
     tm1637_clear(dev);
     tm1637_display_on(dev, true);
     return ESP_OK;

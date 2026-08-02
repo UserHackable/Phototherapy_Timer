@@ -11,7 +11,9 @@
  *   - Wi‑Fi from NVS; UDP JSON discovery for server ID + wall clock
  *   - Key A: user list; digit: therapy recommendation → loads MMSS entry
  *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
- *   - SNTP (LAN then public) only if discovery does not supply time
+ *   - Server IP from UDP discovery only (no hardcoded LAN host)
+ *   - SNTP public pools only if discovery does not supply time
+ *   - LCD / TM1637 / keypad optional — run discovery headless if absent
  *   - If offline, timer-only and retry Wi‑Fi periodically
  *
  *   ./scripts/fw idf nvs-wifi
@@ -80,24 +82,25 @@ static const char *TAG = "session_timer";
 #define SNTP_WAIT_MAX     20
 #define SNTP_PERIOD_US    (6LL * 60 * 60 * 1000000LL)
 
-/* Prefer LAN chrony/NTP (build PC), then public pools. */
-#define SNTP_SERVER_LAN        "192.168.1.163"
-#define SNTP_SERVER_FALLBACK0  "pool.ntp.org"
-#define SNTP_SERVER_FALLBACK1  "time.google.com"
+/* Public SNTP only — wall clock prefers UDP discovery pong (no hardcoded LAN IP). */
+#define SNTP_SERVER0  "pool.ntp.org"
+#define SNTP_SERVER1  "time.google.com"
 
 /* UDP JSON discovery — matches server UdpDiscoveryListener (docs/device-discovery.md). */
 #define DISCOVERY_PORT        3000
 #define DISCOVERY_JSON_V      1
-#define DISCOVERY_TIMEOUT_MS  1500
-#define DISCOVERY_ATTEMPTS    2
+#define DISCOVERY_TIMEOUT_MS  2000
+#define DISCOVERY_ATTEMPTS    3
 #define DISCOVERY_PERIOD_MS   (5 * 60 * 1000)
-#define DISCOVERY_BOOT_WAIT_MS 4000
+#define DISCOVERY_BOOT_WAIT_MS 6000
 
-#define NVS_NS_WIFI  "wifi"
-#define NVS_KEY_SSID "ssid"
-#define NVS_KEY_PASS "password"
-#define GOT_IP_BIT   BIT0
-#define TZ_POSIX     "MST7MDT,M3.2.0,M11.1.0"
+#define NVS_NS_WIFI     "wifi"
+#define NVS_KEY_SSID    "ssid"
+#define NVS_KEY_PASS    "password"
+#define NVS_NS_DISC     "discovery"
+#define NVS_KEY_SRV_IP  "server_ip"
+#define GOT_IP_BIT      BIT0
+#define TZ_POSIX        "MST7MDT,M3.2.0,M11.1.0"
 
 typedef enum {
     ST_ENTRY = 0,
@@ -116,6 +119,7 @@ static bool s_lcd_ok;
 static tm1637_t s_tm;
 static bool s_tm_ok;
 static keypad_i2c_t s_kp;
+static bool s_kp_ok;
 
 static state_t s_state = ST_ENTRY;
 static int s_entry = DEFAULT_ENTRY_MMSS;
@@ -142,6 +146,8 @@ static int64_t s_last_discovery_us;
 
 static char s_device_identity[40];
 static char s_server_ip[16];
+/** Last known server for unicast discovery (RAM + NVS); not required for s_have_server. */
+static char s_server_ip_hint[16];
 static char s_server_identity[64];
 static bool s_have_server;
 static bool s_time_from_discovery;
@@ -493,11 +499,9 @@ static void sntp_ensure_started(void)
     setenv("TZ", TZ_POSIX, 1);
     tzset();
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, SNTP_SERVER_LAN);
-    esp_sntp_setservername(1, SNTP_SERVER_FALLBACK0);
-    esp_sntp_setservername(2, SNTP_SERVER_FALLBACK1);
-    ESP_LOGI(TAG, "SNTP servers: %s, %s, %s",
-             SNTP_SERVER_LAN, SNTP_SERVER_FALLBACK0, SNTP_SERVER_FALLBACK1);
+    esp_sntp_setservername(0, SNTP_SERVER0);
+    esp_sntp_setservername(1, SNTP_SERVER1);
+    ESP_LOGI(TAG, "SNTP servers (discovery fallback): %s, %s", SNTP_SERVER0, SNTP_SERVER1);
     esp_sntp_init();
     s_sntp_started = true;
 }
@@ -608,6 +612,40 @@ static void build_device_identity(void)
     ESP_LOGI(TAG, "device identity: %s", s_device_identity);
 }
 
+/** Load last discovered server IP for unicast hint (no hard-coded LAN host). */
+static void nvs_load_server_ip_hint(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_DISC, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(s_server_ip_hint);
+    if (nvs_get_str(h, NVS_KEY_SRV_IP, s_server_ip_hint, &len) == ESP_OK &&
+        s_server_ip_hint[0] != '\0') {
+        ESP_LOGI(TAG, "discovery hint from NVS: %s", s_server_ip_hint);
+    } else {
+        s_server_ip_hint[0] = '\0';
+    }
+    nvs_close(h);
+}
+
+static void nvs_save_server_ip_hint(const char *ip)
+{
+    if (!ip || !ip[0]) {
+        return;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS_DISC, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    if (nvs_set_str(h, NVS_KEY_SRV_IP, ip) == ESP_OK) {
+        nvs_commit(h);
+    }
+    nvs_close(h);
+    strncpy(s_server_ip_hint, ip, sizeof(s_server_ip_hint) - 1);
+    s_server_ip_hint[sizeof(s_server_ip_hint) - 1] = '\0';
+}
+
 /** Apply POSIX TZ string (from discovery or firmware default). */
 static void apply_timezone(const char *tz_posix, const char *tz_name)
 {
@@ -641,8 +679,11 @@ static bool apply_unix_time(int64_t unix_sec)
     return true;
 }
 
-/** Parse JSON pong; fill identity/ip, timezone, and wall clock from "unix". */
-static bool parse_json_pong(const char *msg)
+/**
+ * Parse JSON pong; fill identity/ip, timezone, and wall clock from "unix".
+ * @param from_ip  UDP source (used if pong omits "ip")
+ */
+static bool parse_json_pong(const char *msg, const char *from_ip)
 {
     cJSON *root = cJSON_Parse(msg);
     if (!root) {
@@ -662,13 +703,18 @@ static bool parse_json_pong(const char *msg)
 
     if (cJSON_IsString(ident) && ident->valuestring) {
         strncpy(s_server_identity, ident->valuestring, sizeof(s_server_identity) - 1);
+        s_server_identity[sizeof(s_server_identity) - 1] = '\0';
     } else {
         strncpy(s_server_identity, "(unknown)", sizeof(s_server_identity) - 1);
     }
-    if (cJSON_IsString(ip) && ip->valuestring) {
+
+    s_server_ip[0] = '\0';
+    if (cJSON_IsString(ip) && ip->valuestring && ip->valuestring[0]) {
         strncpy(s_server_ip, ip->valuestring, sizeof(s_server_ip) - 1);
-    } else {
-        s_server_ip[0] = '\0';
+        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
+    } else if (from_ip && from_ip[0]) {
+        strncpy(s_server_ip, from_ip, sizeof(s_server_ip) - 1);
+        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
     }
 
     /* Timezone before settimeofday so localtime uses the server zone. */
@@ -695,6 +741,15 @@ static char *build_json_ping(void)
     cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
     cJSON_AddStringToObject(root, "type", "ping");
     cJSON_AddStringToObject(root, "identity", s_device_identity);
+    /* Report our STA IP so the server can store it even if NAT rewrites peer. */
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip_info = {0};
+    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+        char self_ip[16];
+        ip4_addr_t a = { .addr = ip_info.ip.addr };
+        ip4addr_ntoa_r(&a, self_ip, sizeof(self_ip));
+        cJSON_AddStringToObject(root, "ip", self_ip);
+    }
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return out;
@@ -746,10 +801,12 @@ static bool discovery_once(void)
 
     ESP_LOGI(TAG, "discovery payload: %s", payload);
 
+    /* Prefer last known server (RAM/NVS), then DHCP-derived targets — never a build-time IP. */
     {
         ip4_addr_t known;
-        if (ip4addr_aton(SNTP_SERVER_LAN, &known)) {
-            discovery_send(sock, payload, plen, known.addr, "LAN host");
+        const char *hint = s_server_ip[0] ? s_server_ip : s_server_ip_hint;
+        if (hint[0] && ip4addr_aton(hint, &known)) {
+            discovery_send(sock, payload, plen, known.addr, "last server");
         }
     }
 
@@ -776,18 +833,26 @@ static bool discovery_once(void)
             break;
         }
         rx[n] = '\0';
-        if (!parse_json_pong(rx)) {
+
+        char from[16];
+        ip4_addr_t from_a = { .addr = src.sin_addr.s_addr };
+        ip4addr_ntoa_r(&from_a, from, sizeof(from));
+
+        if (!parse_json_pong(rx, from)) {
             continue;
         }
         s_have_server = true;
         found = true;
-        ESP_LOGI(TAG, "discovery pong identity=%s ip=%s time_from_disc=%d",
-                 s_server_identity, s_server_ip, (int)s_time_from_discovery);
+        if (s_server_ip[0]) {
+            nvs_save_server_ip_hint(s_server_ip);
+        }
+        ESP_LOGI(TAG, "discovery pong from %s identity=%s ip=%s time_from_disc=%d",
+                 from, s_server_identity, s_server_ip, (int)s_time_from_discovery);
         break;
     }
     close(sock);
     if (!found) {
-        ESP_LOGW(TAG, "discovery: no pong (Rails UDP %d / UFW?)", DISCOVERY_PORT);
+        ESP_LOGW(TAG, "discovery: no pong (Rails UDP %d / broadcast?)", DISCOVERY_PORT);
     }
     return found;
 }
@@ -1653,6 +1718,10 @@ static void tick_idle_to_clock(void)
 
 /* ---------- init ---------- */
 
+/**
+ * Probe optional front-panel hardware. Missing LCD / TM1637 / keypad is OK
+ * (bench ESP without UI still runs Wi‑Fi + UDP discovery).
+ */
 static bool init_peripherals(void)
 {
     lamp_init();
@@ -1668,23 +1737,43 @@ static bool init_peripherals(void)
     };
     i2c_master_bus_handle_t bus = NULL;
     if (i2c_new_master_bus(&bus_cfg, &bus) != ESP_OK) {
-        return false;
+        ESP_LOGW(TAG, "I2C bus init failed — continuing without LCD/keypad");
+        bus = NULL;
     }
 
-    uint8_t lcd_addr = 0;
-    if (lcd1602_init(bus, &s_lcd, &lcd_addr) == ESP_OK) {
-        lcd1602_backlight(&s_lcd, true);
-        lcd1602_clear(&s_lcd);
-        s_lcd_ok = true;
+    s_lcd_ok = false;
+    s_tm_ok = false;
+    s_kp_ok = false;
+
+    if (bus) {
+        uint8_t lcd_addr = 0;
+        if (lcd1602_init(bus, &s_lcd, &lcd_addr) == ESP_OK) {
+            lcd1602_backlight(&s_lcd, true);
+            lcd1602_clear(&s_lcd);
+            s_lcd_ok = true;
+            ESP_LOGI(TAG, "LCD present @ 0x%02x", lcd_addr);
+        } else {
+            ESP_LOGW(TAG, "LCD not present — status lines on serial only");
+        }
+
+        if (keypad_i2c_init(bus, &s_kp, KEYPAD_ADDR) == ESP_OK) {
+            s_kp_ok = true;
+            ESP_LOGI(TAG, "keypad present @ 0x%02x", KEYPAD_ADDR);
+        } else {
+            ESP_LOGW(TAG, "keypad not present — keys disabled");
+        }
     }
+
     if (tm1637_init(&s_tm, TM_CLK_GPIO, TM_DIO_GPIO) == ESP_OK) {
         tm1637_set_brightness(&s_tm, 5);
         s_tm_ok = true;
+        ESP_LOGI(TAG, "TM1637 present");
+    } else {
+        ESP_LOGW(TAG, "TM1637 not present — LED digits disabled");
     }
-    if (keypad_i2c_init(bus, &s_kp, KEYPAD_ADDR) != ESP_OK) {
-        ESP_LOGE(TAG, "keypad missing");
-        return false;
-    }
+
+    ESP_LOGI(TAG, "peripherals: lcd=%d tm=%d keypad=%d",
+             (int)s_lcd_ok, (int)s_tm_ok, (int)s_kp_ok);
     return true;
 }
 
@@ -1707,6 +1796,7 @@ void app_main(void)
     }
 
     build_device_identity();
+    nvs_load_server_ip_hint();
 
     lcd_status("Session timer", "WiFi…");
     if (wifi_start_from_nvs()) {
@@ -1715,13 +1805,18 @@ void app_main(void)
             /* Prefer wall clock from Rails discovery pong; SNTP only if that fails. */
             s_need_discovery = true;
             int waited = 0;
-            while (waited < DISCOVERY_BOOT_WAIT_MS && !s_time_from_discovery) {
+            while (waited < DISCOVERY_BOOT_WAIT_MS && !s_have_server) {
                 vTaskDelay(pdMS_TO_TICKS(200));
                 waited += 200;
             }
-            if (!s_time_from_discovery) {
-                ESP_LOGW(TAG, "no discovery time — SNTP fallback");
+            if (s_have_server) {
+                ESP_LOGI(TAG, "boot discovery ok: %s @ %s", s_server_identity, s_server_ip);
+                lcd_status("Server found", s_server_ip[0] ? s_server_ip : s_server_identity);
+            } else {
+                ESP_LOGW(TAG, "no discovery yet — SNTP fallback if needed");
                 lcd_status("Session timer", "SNTP…");
+            }
+            if (!s_time_from_discovery) {
                 sync_time_boot_sntp_fallback();
             }
         } else {
@@ -1744,11 +1839,12 @@ void app_main(void)
     int release_count = RELEASE_POLLS; /* start armed */
     bool armed = true;
     int64_t last_clock_paint_us = 0;
+    int64_t last_headless_log_us = 0;
 
     while (1) {
-        /* Keypad first so Wi‑Fi / LCD paint cannot starve input */
+        /* Keypad first so Wi‑Fi / LCD paint cannot starve input (skip if absent). */
         char key = '\0';
-        bool down = keypad_i2c_scan(&s_kp, &key);
+        bool down = s_kp_ok && keypad_i2c_scan(&s_kp, &key);
         if (down) {
             release_count = 0;
             if (key == pending) {
@@ -1776,6 +1872,20 @@ void app_main(void)
 
         network_maintenance();
         tick_fan_rundown();
+
+        /* Headless bench: periodic status (no keypad/LCD). */
+        if (!s_kp_ok && !s_lcd_ok) {
+            int64_t now = esp_timer_get_time();
+            if (now - last_headless_log_us >= 30000000LL) {
+                last_headless_log_us = now;
+                ESP_LOGI(TAG,
+                         "headless: ip=%d server=%s@%s time_from_disc=%d",
+                         (int)s_have_ip,
+                         s_have_server ? s_server_identity : "-",
+                         s_have_server ? s_server_ip : "-",
+                         (int)s_time_from_discovery);
+            }
+        }
 
         if (s_state == ST_RUNNING) {
             tick_running();

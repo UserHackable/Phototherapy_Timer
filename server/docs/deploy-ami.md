@@ -19,54 +19,54 @@ Upstream: [Ruby-on-Rails-Wizardry/arch-rails-server](https://github.com/Ruby-on-
 
 ## UDP discovery / Docker
 
-ESP modules talk **UDP 3000** JSON to the Rails app (`UdpDiscoveryListener`). That port is
-published on the web container (`config/deploy.yml`), not via kamal-proxy.
+ESP modules talk **UDP 3000** JSON (`UdpDiscoveryListener`). This is **not** via kamal-proxy.
 
-**Problem:** Docker’s default **userland-proxy** (`docker-proxy`) rewrites the client address to
-the bridge gateway (e.g. `172.18.0.1`). The app then stores the wrong `devices.ip` and unicasts
-pongs at the proxy instead of the module. Discovery can look “dead” on the ESP even while
-pings appear in app logs.
+### Why a host-network accessory
 
-**Fix (host-wide, once):** disable userland-proxy so published ports use iptables DNAT and keep
-the real LAN source IP:
+Bridge-published UDP (`-p 3000:3000/udp`) has two failure modes on this host:
 
-```bash
-# as root@ami
-mkdir -p /etc/docker
-cat >/etc/docker/daemon.json <<'EOF'
-{
-  "userland-proxy": false
-}
-EOF
-systemctl restart docker
-```
+| Mode | Client IP | Broadcast from ESP |
+|------|-----------|--------------------|
+| userland-proxy (default) | rewritten to `172.18.0.1` | often works |
+| iptables DNAT (`userland-proxy: false`) | real LAN IP | **not delivered** to the container |
 
-Confirm:
+Zero-config discovery needs **broadcast** (no hard-coded server IP in firmware). Real
+`devices.ip` needs the **true peer** (or a client-reported `ip` field on the ping).
+
+**Layout in `config/deploy.yml`:**
+
+| Process | Role |
+|---------|------|
+| `web` | HTTP via kamal-proxy; `UDP_DISCOVERY=0` |
+| accessory `udp_discovery` | **`network: host`**, binds UDP 3000, shared SQLite volume |
 
 ```bash
-docker info | grep -i userland
-# Userland Proxy: false
+# after bin/kamal deploy
+bin/kamal accessory boot udp_discovery     # first time
+bin/kamal accessory reboot udp_discovery   # after image changes
+bin/kamal accessory logs udp_discovery
 ```
 
-Containers with `restart: unless-stopped` (kamal-proxy + app) come back after the restart.
-Stale `*_replaced_*` / exited app containers can be removed if they fight for UDP 3000:
+Firmware still has **no hard-coded LAN IP**. Optional NVS hint `discovery/server_ip`
+(from `secrets/wifi.yaml` `server_ip:`) speeds first unicast; broadcast finds the host
+listener without that hint.
 
-```bash
-docker container prune -f   # only stopped/created leftovers
-```
-
-After a healthy deploy, a laptop ping should log the **LAN** client IP (e.g. `192.168.1.x`),
-not `172.18.0.1`:
+Self-check (unicast **and** broadcast should both pong):
 
 ```bash
 python3 - <<'PY'
 import json, socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 s.settimeout(2)
-s.sendto(json.dumps({"v":1,"type":"ping","identity":"manual-test"}).encode(), ("192.168.1.202", 3000))
-print(s.recvfrom(1024))
+msg = json.dumps({"v":1,"type":"ping","identity":"manual-test"}).encode()
+for dest in [("192.168.1.202", 3000), ("192.168.1.255", 3000)]:
+    s.sendto(msg, dest)
+    try:
+        print(dest, s.recvfrom(1024))
+    except Exception as e:
+        print(dest, "FAIL", e)
 PY
-# then: docker logs <web> 2>&1 | grep udp_discovery | tail
 ```
 
 ## Prerequisites (laptop)

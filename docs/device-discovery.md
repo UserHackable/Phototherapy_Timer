@@ -68,10 +68,22 @@ UTF-8 JSON objects (single datagram, no framing):
 
 Legacy text `PHOTOTHERAPY/1 PING …` is still **accepted** by the server for transition; modules send **JSON only**.
 
+## How the module finds the server (no hard-coded LAN IP)
+
+After DHCP the ESP sends UDP **ping** on port **3000** to:
+
+1. **Last known server** — from the previous pong (RAM) or NVS key `discovery/server_ip`
+2. **Default gateway** (DHCP)
+3. **Subnet broadcast**
+4. **`255.255.255.255`**
+
+A **pong** supplies `identity`, `ip` (stored for users/therapy/exposure + NVS hint), and wall clock
+`unix` / timezone. Follow-up traffic is **unicast** only to that discovered `ip`.
+
 ## Time source priority
 
 1. **UDP discovery pong** `unix` field (preferred).
-2. **SNTP** — LAN host (`192.168.1.163` in firmware) then `pool.ntp.org` / `time.google.com` if discovery fails or returns no usable `unix`.
+2. **SNTP** public pools (`pool.ntp.org`, `time.google.com`) only if discovery fails or returns no usable `unix`.
 
 Periodic discovery (about every 5 minutes) refreshes server identity and can refresh clock from the pong. SNTP is not used while discovery has already set time.
 
@@ -161,7 +173,8 @@ PY
 | No pong, Rails silent | UFW / firewall; Rails `0.0.0.0`; UDP listener log on boot |
 | Pong without `unix` | Server clock; Time.zone |
 | Discovery works, clock wrong | TZ on module (`MST7MDT…`); `unix` is UTC |
-| Falls back to SNTP always | Rails not running; wrong host IP in firmware (`SNTP_SERVER_LAN`) |
+| Falls back to SNTP always | Rails not running; UDP 3000 blocked; AP client isolation blocking broadcast |
+| `devices.ip` is `172.x` | Docker userland-proxy rewriting source IP — see `server/docs/deploy-ami.md` |
 
 ## Related
 

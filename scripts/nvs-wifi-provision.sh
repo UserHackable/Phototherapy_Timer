@@ -49,14 +49,23 @@ fi
 
 mkdir -p "$GEN_DIR"
 
-# Parse first network from simple YAML (stdlib Python)
+# Parse first network + optional discovery server_ip from simple YAML (stdlib Python)
+# Optional top-level or under first network:
+#   server_ip: 192.168.1.202
+# (hint only — firmware still discovers via UDP; not a hard-coded app constant)
 eval "$(python3 - "$YAML" <<'PY'
 import re, sys, shlex
 from pathlib import Path
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
 lines = [ln for ln in text.splitlines() if not re.match(r"^\s*#", ln)]
-ssid = password = None
+ssid = password = server_ip = None
 for ln in lines:
+    m = re.match(r"^\s*server_ip:\s*(.*)$", ln)
+    if m:
+        raw = m.group(1).strip().strip("\"'")
+        if raw:
+            server_ip = raw
+        continue
     m = re.match(r"^\s*-\s*ssid:\s*(.*)$", ln)
     if m:
         if ssid is not None:
@@ -76,6 +85,7 @@ if password is None:
     password = ""
 print(f"SSID={shlex.quote(ssid)}")
 print(f"PASSWORD={shlex.quote(password)}")
+print(f"SERVER_IP={shlex.quote(server_ip or '')}")
 PY
 )"
 
@@ -85,15 +95,26 @@ if [[ "$SSID" == *","* || "$PASSWORD" == *","* ]]; then
   echo "error: ssid/password must not contain commas (NVS CSV limitation)" >&2
   exit 1
 fi
+if [[ -n "${SERVER_IP}" && "$SERVER_IP" == *","* ]]; then
+  echo "error: server_ip must not contain commas (NVS CSV limitation)" >&2
+  exit 1
+fi
 
 {
   echo "key,type,encoding,value"
   echo "wifi,namespace,,"
   echo "ssid,data,string,${SSID}"
   echo "password,data,string,${PASSWORD}"
+  if [[ -n "${SERVER_IP}" ]]; then
+    echo "discovery,namespace,,"
+    echo "server_ip,data,string,${SERVER_IP}"
+  fi
 } >"$CSV"
 
 echo "Generating NVS image for SSID='${SSID}' (password not printed)"
+if [[ -n "${SERVER_IP}" ]]; then
+  echo "  discovery/server_ip hint='${SERVER_IP}'"
+fi
 python3 "$GEN_PY" generate "$CSV" "$BIN" "$NVS_SIZE"
 
 PORT="${PORT:-$("$REPO/scripts/detect-esp-port.sh")}"
