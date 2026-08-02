@@ -40,7 +40,8 @@ env:
 accessories:
   udp_discovery:
     host: 192.168.1.202
-    image: phototherapy_server
+    # Same registry as app image (local registry tunnelled by Kamal).
+    image: localhost:5555/phototherapy_server:latest
     network: host
     cmd: 'bin/rails runner "UdpDiscoveryListener.start!; sleep"'
     env:
