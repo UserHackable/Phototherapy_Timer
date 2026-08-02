@@ -16,8 +16,12 @@ servers:
 # LAN multi-app via kamal-proxy (HTTP on host :80). No Let's Encrypt on LAN.
 # Point clients at phototherapy.ami.lan (or add /etc/hosts → 192.168.1.202).
 proxy:
-  host: phototherapy.ami.lan
+  # IP host so ESP OTA can use http://192.168.1.202/ without mDNS/hosts.
+  hosts:
+    - phototherapy.ami.lan
+    - 192.168.1.202
   # ssl: true   # enable only with a public DNS name reachable for ACME
+
 
 # Local registry (Kamal starts it on the deploy machine and SSH-tunnels to hosts).
 registry:

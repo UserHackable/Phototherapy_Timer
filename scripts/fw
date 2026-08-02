@@ -16,6 +16,7 @@
 #   ./scripts/fw idf upload <app>     # build + flash
 #   ./scripts/fw idf monitor <app>
 #   ./scripts/fw idf nvs-wifi         # provision secrets/wifi.yaml → NVS
+#   ./scripts/fw idf ota-publish <app> # build + push firmware to ami for LAN OTA
 #
 #   ./scripts/fw port
 #
@@ -24,6 +25,8 @@
 #   ./scripts/fw idf nvs-wifi
 #   ./scripts/fw idf upload wifi_connect
 #   ./scripts/fw idf monitor wifi_connect
+#   ./scripts/fw idf ota-publish ota_smoke
+
 
 set -euo pipefail
 
@@ -167,7 +170,11 @@ cmd_idf() {
     nvs-wifi|provision-wifi)
       "$REPO/scripts/nvs-wifi-provision.sh" "$@"
       ;;
-    *) die "unknown idf subcommand: $sub (list install build flash upload monitor nvs-wifi)" ;;
+    ota-publish)
+      app=$(idf_resolve_app "${1:-}")
+      "$REPO/scripts/ota-publish.sh" "$app"
+      ;;
+    *) die "unknown idf subcommand: $sub (list install build flash upload monitor nvs-wifi ota-publish)" ;;
   esac
 }
 

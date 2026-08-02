@@ -28,6 +28,12 @@ Tooling overview: [`../docs/toolchain.md`](../docs/toolchain.md).
 ./scripts/fw idf monitor wifi_scan    # serial log / AP table
 ```
 
+### OTA partition table (product apps)
+
+`session_timer` and `wifi_connect` use a **custom dual-OTA** table
+([`partitions/partitions_two_ota_4mb.csv`](partitions/partitions_two_ota_4mb.csv)).
+Switching to that table needs a **full USB flash** once. See [docs/ota.md](../docs/ota.md).
+
 ```bash
 PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 ```
@@ -45,6 +51,7 @@ PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 | `tm1637_hello` | TM1637 4-digit bring-up (CLK=18, DIO=23); 88:88 → 12:34 → MM:SS |
 | `wifi_scan` | STA scan; print APs (no secrets) |
 | `wifi_connect` | NVS Wi‑Fi + DHCP + SNTP on UART (credentials via `nvs-wifi`) |
+| `ota_smoke` | Dual-OTA partition + `uh_ota` LAN check (proof; see [docs/ota.md](../docs/ota.md)) |
 
 Add an app: copy `apps/blink`, rename `project(…)` in `CMakeLists.txt`, replace `main/main.c`.
 
