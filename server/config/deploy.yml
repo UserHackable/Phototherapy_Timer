@@ -11,6 +11,9 @@ servers:
     hosts:
       - 192.168.1.202
     # ESP32 UDP discovery (UdpDiscoveryListener) — not handled by kamal-proxy.
+    # Host Docker must use iptables publish (userland-proxy: false) so the
+    # container sees the real ESP LAN IP and pongs route back correctly.
+    # See docs/deploy-ami.md § "UDP discovery / Docker".
     options:
       publish:
         - "3000:3000/udp"

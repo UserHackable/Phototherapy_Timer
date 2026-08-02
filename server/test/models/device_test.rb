@@ -21,4 +21,15 @@ class DeviceTest < ActiveSupport::TestCase
   test "upsert_from_discovery requires ip" do
     assert_raises(ArgumentError) { Device.upsert_from_discovery!(ip: "  ") }
   end
+
+  test "upsert_from_discovery refreshes updated_at when nothing else changes" do
+    device = Device.upsert_from_discovery!(ip: "10.0.0.5", identity: "esp-stable")
+    original = device.updated_at
+
+    travel 2.seconds do
+      again = Device.upsert_from_discovery!(ip: "10.0.0.5", identity: "esp-stable")
+      assert_equal device.id, again.id
+      assert_operator again.updated_at, :>, original
+    end
+  end
 end

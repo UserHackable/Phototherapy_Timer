@@ -18,6 +18,8 @@ class Device < ApplicationRecord
 
     device.ip = ip
     device.identity = identity if identity
+    # Last-seen even when IP/identity are unchanged (otherwise save is a no-op).
+    device.updated_at = Time.current
     device.save!
     device
   end
