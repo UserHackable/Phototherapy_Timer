@@ -1593,19 +1593,15 @@ static void maybe_ota_check(void)
 
     int64_t now = esp_timer_get_time();
     if (!s_ota_boot_marked) {
-        /* First window: mark image valid for rollback, then wait before OTA. */
+        /* Mark image valid after boot, then run first OTA check immediately. */
         if (now < (int64_t)OTA_BOOT_DELAY_MS * 1000) {
             return;
         }
         uh_ota_mark_valid();
         s_ota_boot_marked = true;
-        s_last_ota_check_us = now; /* first real check after another period half */
         ESP_LOGI(TAG, "OTA: app marked valid; version=%s", uh_ota_running_version());
-        /* Still run a check soon after boot (half period) so publish → update is practical. */
-        s_last_ota_check_us = now - ((int64_t)OTA_CHECK_PERIOD_MS * 1000) / 2;
-    }
-
-    if ((now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
+        /* Fall through so first check runs now (later polls use OTA_CHECK_PERIOD_MS). */
+    } else if ((now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
         return;
     }
     if (!ota_may_start()) {

@@ -5,7 +5,13 @@ not need USB access for routine upgrades.
 
 Status: **dual-OTA partitions + `uh_ota` + `ota_smoke` + Rails publish proven
 on hardware** (SHA-256 OK, reboot into new slot). **`session_timer` runs LAN
-OTA when idle** (not during a lamp session or user-list paging).
+OTA when idle** (not during a lamp session or user-list paging). First boot
+after a dual-OTA USB flash checks for updates ~20 s after mark-valid; later
+polls are every ~15 min.
+
+**Version:** build stamps `esp_app_desc.version` with the git short SHA
+(`PROJECT_VER`). `ota-publish` writes that same string into `manifest.json`
+so “already up to date” works (no re-flash loop).
 
 ## Why
 
@@ -57,12 +63,22 @@ Other apps may stay on single-app until needed.
    writes the inactive slot, reboots.
 5. After a healthy boot it marks the image valid (bootloader rollback cancelled).
 
-Publish a new build from a machine with the toolchain and SSH to ami:
+Publish a new build from a machine with the toolchain and SSH/docker on ami
+(`OTA_SSH` defaults to `ami` or `deploy@192.168.1.202`):
 
 ```bash
 ./scripts/fw idf ota-publish session_timer
-# force re-flash same git short version:
+# force re-flash same version (proof / recovery):
 OTA_FORCE=1 ./scripts/fw idf ota-publish session_timer
+```
+
+**Pi (USB programming host):** module on `/dev/ttyUSB0`; repo often under
+`~/User-Hackable/Phototherapy_Timer`. One-time dual-OTA flash, then LAN only:
+
+```bash
+./scripts/fw idf upload session_timer
+./scripts/fw idf ota-publish session_timer   # OTA_SSH=ami if needed
+./scripts/fw idf monitor session_timer
 ```
 
 Serial (optional) while testing:

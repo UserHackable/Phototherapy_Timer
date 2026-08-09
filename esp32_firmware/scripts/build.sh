@@ -33,10 +33,17 @@ if ! command -v cmake >/dev/null 2>&1; then
   exit 1
 fi
 
+# Stamp app_desc.version with repo short SHA so OTA manifests match the binary
+# (uh_ota skips when remote version == running version).
+REPO="$(cd "$ROOT/.." && pwd)"
+PROJECT_VER="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo 1)"
+export PROJECT_VER
+
 cd "$APP_DIR"
 if [[ ! -f sdkconfig ]]; then
   echo "==> set-target esp32 (first time for $APP)"
   idf.py set-target esp32
 fi
-echo "==> build app=$APP"
-idf.py build
+echo "==> build app=$APP PROJECT_VER=$PROJECT_VER"
+# -D PROJECT_VER overrides IDF git-describe (which often appends -dirty).
+idf.py -D "PROJECT_VER=${PROJECT_VER}" build
