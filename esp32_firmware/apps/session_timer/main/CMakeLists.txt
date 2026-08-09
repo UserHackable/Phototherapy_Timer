@@ -3,5 +3,6 @@ idf_component_register(
   INCLUDE_DIRS "."
   # Do not set REQUIRES alone — that drops main's default common deps.
   # json = cJSON for UDP discovery payloads.
-  PRIV_REQUIRES json driver esp_wifi nvs_flash esp_event esp_netif esp_timer esp_driver_gpio esp_driver_i2c esp_driver_ledc
+  # uh_ota = LAN HTTP dual-slot firmware update (docs/ota.md).
+  PRIV_REQUIRES json driver esp_wifi nvs_flash esp_event esp_netif esp_timer esp_driver_gpio esp_driver_i2c esp_driver_ledc uh_ota
 )

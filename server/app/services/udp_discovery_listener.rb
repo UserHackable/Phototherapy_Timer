@@ -23,6 +23,7 @@ require "socket"
 #      "tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0"}
 #     {"v":1,"type":"users","users":[{"id":1,"name":"rob"}, ...]}  # ids 1–9 (not Guest)
 #     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":30}
+#     # optional: "message":"shown on module 16x2 LCD after A+digit"
 #     {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":30}
 #
 # recommended_seconds defaults to DEFAULT_RECOMMENDED_SECONDS until per-user
@@ -425,7 +426,7 @@ class UdpDiscoveryListener
     }.to_json
   end
 
-  def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil)
+  def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil, message: nil)
     payload = {
       v: PROTOCOL_VERSION,
       type: "therapy",
@@ -434,6 +435,8 @@ class UdpDiscoveryListener
     payload[:name] = name if name.present?
     payload[:recommended_seconds] = recommended_seconds if recommended_seconds
     payload[:error] = error if error.present?
+    # Free-text note for the module 16x2 (session_timer shows then returns to entry).
+    payload[:message] = message if message.present?
     payload.to_json
   end
 

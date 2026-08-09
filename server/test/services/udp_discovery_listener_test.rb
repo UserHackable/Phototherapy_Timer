@@ -117,9 +117,25 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal UdpDiscoveryListener::DEFAULT_RECOMMENDED_SECONDS, data["recommended_seconds"]
     assert_equal 30, data["recommended_seconds"]
     assert_not data.key?("error")
+    assert_not data.key?("message")
 
     device = Device.find_by!(identity: "esp-therapy")
     assert_equal "192.168.50.40", device.ip
+  end
+
+  test "build_therapy_reply includes optional message for module LCD" do
+    json = UdpDiscoveryListener.build_therapy_reply(
+      user_id: 4,
+      name: "miriam",
+      recommended_seconds: 30,
+      message: "Last session 2d ago"
+    )
+    data = JSON.parse(json)
+    assert_equal "therapy", data["type"]
+    assert_equal 4, data["user_id"]
+    assert_equal "miriam", data["name"]
+    assert_equal 30, data["recommended_seconds"]
+    assert_equal "Last session 2d ago", data["message"]
   end
 
   test "handle_packet therapy not_found for unknown user" do

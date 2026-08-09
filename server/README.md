@@ -92,7 +92,7 @@ Full wire format: [docs/device-discovery.md](../docs/device-discovery.md).
 |------|-----------|------|
 | `ping` → `pong` | ESP ↔ server | Device upsert; wall clock **unix** + **tz** / **tz_posix** / **tz_offset** |
 | `users` | ESP ↔ server | Key **A**: household ids 1–9, then **Guest id 0** |
-| `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds` (default **30**) |
+| `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds` (default **30**); optional `message` → module 16x2 |
 | `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix` |
 
 ### ENV

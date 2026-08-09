@@ -15,7 +15,7 @@ Custom **UserHackable** timer / controller for a failed stock timer on a SolRx E
 | Goal | First **duplicate stock timer behavior**, then add convenience (schedules, safety limits, status, session / health logging) |
 | Use | Household UV phototherapy for eczema (several people) |
 | Why this unit | Solarc [right to repair](https://solarcsystems.com/right-to-repair/); serviceable internals (mostly Wago connectors) |
-| Status | Early product: `session_timer` UI + Rails discovery/exposures; fault was stock timer circuit |
+| Status | Early product: `session_timer` UI + Rails discovery/exposures + LAN OTA; fault was stock timer circuit |
 
 
 Manufacturer timer replacement exists; this repo deliberately replaces the failed timer with a custom controller and extended features. Stock diagnosis and the full parts list live in [README.md](README.md).
@@ -86,6 +86,6 @@ Never force-push `master` unless the user explicitly asks.
 ## Style
 
 - Prefer **minimal, focused diffs**. No drive-by refactors.
-- Match existing project style once code lands; MCU is **ESP32**, SDK still TBD (CLI-first).
+- Match existing project style; MCU is **ESP32**, product firmware is **ESP-IDF** (CLI via `./scripts/fw`).
 - Prefer complete sentences in commit messages: *what* and *why*.
 
