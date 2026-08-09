@@ -6,11 +6,11 @@ CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 CONFIG_LWIP_SNTP_MAX_SERVERS=3
 
 # Dual OTA on 4MB (see esp32_firmware/partitions/partitions_two_ota_4mb.csv).
-# First flash after this change must be full USB flash (partition table).
+# Partition-table changes require a full USB flash (not app-only OTA).
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../partitions/partitions_two_ota_4mb.csv"
-# LAN OTA uses HTTP + SHA-256 (not public internet).
+# LAN OTA: plain HTTP + SHA-256 integrity (private LAN only).
 CONFIG_OTA_ALLOW_HTTP=y
 CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
-# Roll back if new app does not mark itself valid after boot.
+# Bootloader rolls back if the app never marks itself valid.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

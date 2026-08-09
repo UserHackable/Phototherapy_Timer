@@ -583,7 +583,7 @@ Quit monitor with **Ctrl+]** (not Ctrl+C). Any serial tool at **115200 8N1** on 
 OTA_FORCE=1 ./scripts/fw idf ota-publish session_timer
 ```
 
-Module picks it up on the next poll (~15 min, or sooner after boot on the half-period first check). Watch serial for `uh_ota: SHA-256 OK` / reboot.
+Module picks it up on the next poll (~15 min, or ~20 s after boot on the first check). Watch serial for `uh_ota: SHA-256 OK` / reboot.
 
 Full write-up: [docs/ota.md](docs/ota.md).
 
@@ -604,4 +604,10 @@ Build after integration: **OK** (`session_timer.bin` ~52% free in app partition)
 | Serial log | 115200 console; `./scripts/fw idf monitor session_timer` |
 
 **Still local / not committed by default unless you ask:** untracked `server/mise.toml`; ESP-IDF under `~/esp` and `~/.espressif` stay **out of git**. Dual-push only on **send it**.
+
+---
+
+# Session note (2026-08-09) — OTA live on module
+
+Bring-up completed: dual-OTA USB flash on the Pi-connected ESP32, publish to ami, LAN OTA into `ota_1` (SHA-256 OK). Version stamp is git short SHA in both binary and manifest. Product docs: [docs/ota.md](docs/ota.md).
 

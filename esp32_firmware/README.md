@@ -30,9 +30,10 @@ Tooling overview: [`../docs/toolchain.md`](../docs/toolchain.md).
 
 ### OTA partition table (product apps)
 
-`session_timer` and `wifi_connect` use a **custom dual-OTA** table
+`session_timer`, `wifi_connect`, and `ota_smoke` use a **custom dual-OTA** table
 ([`partitions/partitions_two_ota_4mb.csv`](partitions/partitions_two_ota_4mb.csv)).
-Switching to that table needs a **full USB flash** once. See [docs/ota.md](../docs/ota.md).
+A partition-table change needs a **full USB flash** once; routine upgrades use
+`./scripts/fw idf ota-publish <app>`. See [docs/ota.md](../docs/ota.md).
 
 ```bash
 PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
@@ -45,7 +46,8 @@ PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 | `blink` | GPIO 2 LED, 250 ms on/off |
 | `i2c_scan` | Probe I²C on SDA=21 / SCL=22; print addresses that ACK |
 | `keypad_hello` | 4×4 I²C keypad @ **0x20**; show presses on LCD + UART |
-| `session_timer` | Timer + idle wall clock; SSR **26**/LED **2**; piezo **25**; NVS Wi‑Fi — [Gherkin](../docs/features/session_timer.feature) |
+| `session_timer` | Product timer UI + discovery + idle LAN OTA; SSR **26**/LED **2**; piezo **25** — [Gherkin](../docs/features/session_timer.feature), [OTA](../docs/ota.md) |
+| `ota_smoke` | Minimal dual-OTA client against NVS `server_ip` |
 | `lcd_hello` | “Hello, world!” on LCD1602 via PCF8574 backpack |
 | `net_clock` | LCD progress + TM1637 HH:MM + NVS Wi‑Fi + DHCP + SNTP |
 | `tm1637_hello` | TM1637 4-digit bring-up (CLK=18, DIO=23); 88:88 → 12:34 → MM:SS |

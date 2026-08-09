@@ -135,7 +135,7 @@ Product firmware is **ESP-IDF** under `esp32_firmware/`; Arduino sketches remain
 |------|------|
 | [`docs/toolchain.md`](docs/toolchain.md) | Arduino vs ESP-IDF, CLI, flash |
 | [`arduino_test_firmware/`](arduino_test_firmware/) | **mise + arduino-cli** bring-up sketches (optional) |
-| [`esp32_firmware/apps/session_timer`](esp32_firmware/apps/session_timer/) | **Product UI**: entry, countdown, clock, users, therapy, exposure log |
+| [`esp32_firmware/apps/session_timer`](esp32_firmware/apps/session_timer/) | **Product UI**: entry, countdown, clock, users, therapy, exposure log, LAN OTA |
 | [`esp32_firmware/apps/wifi_connect`](esp32_firmware/apps/wifi_connect/) | Wi‑Fi + discovery bring-up |
 | [`server/`](server/) | Rails 8: devices, users, exposures, UDP discovery |
 | [`docs/features/`](docs/features/) | Gherkin product contracts |
@@ -147,7 +147,8 @@ Product firmware is **ESP-IDF** under `esp32_firmware/`; Arduino sketches remain
 ./scripts/fw arduino upload blink
 ./scripts/fw idf install               # once (large)
 ./scripts/fw idf list
-./scripts/fw idf upload session_timer  # product app
+./scripts/fw idf upload session_timer  # product app (full flash once for dual-OTA)
+./scripts/fw idf ota-publish session_timer  # LAN OTA after first USB flash
 ./scripts/fw idf monitor session_timer
 ./scripts/fw port
 
@@ -165,6 +166,7 @@ cd server && bin/setup && bin/rails db:seed && bin/rails server -b 0.0.0.0 -p 30
 |-------|-----|
 | Wi‑Fi / NVS | [docs/wifi-config.md](docs/wifi-config.md) |
 | ESP ↔ Rails UDP | [docs/device-discovery.md](docs/device-discovery.md) |
+| LAN firmware OTA | [docs/ota.md](docs/ota.md) |
 | Pin map / harness | [docs/wiring.md](docs/wiring.md) |
 | Rails app | [server/README.md](server/README.md) |
 | Timer behavior (Gherkin) | [docs/features/session_timer.feature](docs/features/session_timer.feature) |
@@ -180,7 +182,8 @@ Working LAN stack and session UI (early product, not medical dosing):
 | **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (default **30 s**) |
 | **Lamp / fan** | Lamps **GPIO26** + LED **GPIO2**; fan **GPIO27** on with lamps, **30 s** rundown after off |
 | **Exposure log** | Lamp-off UDP → Rails `Exposure` under `/users/:id/exposures` |
-| **Rails** | Auth, devices, users, exposures; UDP ping/pong/users/therapy/exposure |
+| **LAN OTA** | Dual-OTA partitions; idle poll + SHA-256; publish via `./scripts/fw idf ota-publish` |
+| **Rails** | Auth, devices, users, exposures, firmware files; UDP ping/pong/users/therapy/exposure |
 
 ## Remotes
 

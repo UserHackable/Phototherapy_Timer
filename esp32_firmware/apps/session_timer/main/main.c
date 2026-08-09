@@ -19,8 +19,8 @@
  *   - If offline, timer-only and retry Wi‑Fi periodically
  *
  *   ./scripts/fw idf nvs-wifi
- *   ./scripts/fw idf upload session_timer
- *   ./scripts/fw idf ota-publish session_timer   # after first USB flash
+ *   ./scripts/fw idf upload session_timer   # full flash once for dual-OTA table
+ *   ./scripts/fw idf ota-publish session_timer
  *
  * Behavior: docs/features/session_timer.feature
  * Discovery: docs/device-discovery.md
@@ -1593,14 +1593,13 @@ static void maybe_ota_check(void)
 
     int64_t now = esp_timer_get_time();
     if (!s_ota_boot_marked) {
-        /* Mark image valid after boot, then run first OTA check immediately. */
+        /* Cancel bootloader rollback, then fall through into the first check. */
         if (now < (int64_t)OTA_BOOT_DELAY_MS * 1000) {
             return;
         }
         uh_ota_mark_valid();
         s_ota_boot_marked = true;
         ESP_LOGI(TAG, "OTA: app marked valid; version=%s", uh_ota_running_version());
-        /* Fall through so first check runs now (later polls use OTA_CHECK_PERIOD_MS). */
     } else if ((now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
         return;
     }
@@ -1625,18 +1624,17 @@ static void maybe_ota_check(void)
              base, uh_ota_running_version());
     lcd_status("Checking for", "update…");
     esp_err_t err = uh_ota_check_and_update(&cfg);
-    /* Successful update reboots inside uh_ota — we only get here on no-op/fail. */
+    /* uh_ota reboots on success; these paths are skip / no image / error. */
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "OTA: up to date");
     } else if (err == ESP_ERR_NOT_FOUND) {
-        ESP_LOGI(TAG, "OTA: no manifest/image on server yet");
+        ESP_LOGI(TAG, "OTA: no manifest/image on server");
     } else if (err == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "OTA: skipped (not safe to update now)");
     } else {
         ESP_LOGW(TAG, "OTA: %s", esp_err_to_name(err));
     }
 
-    /* Restore UI after a failed/noop check (success already rebooted). */
     if (s_state == ST_CLOCK) {
         ui_clock_refresh();
     } else if (s_state == ST_ENTRY) {
