@@ -160,6 +160,17 @@ Feature: Session timer entry and countdown
     And the LED display shows "00:30"
     And the UI returns to entry mode ready to start with "#"
 
+  Scenario: Therapy reply message is shown on the LCD
+    Given the UI is paging the household user list
+    And the server will recommend 30 seconds for user 4
+    And the therapy reply includes message "Last session 2d ago"
+    When the user presses "4"
+    Then the module sends a JSON therapy request with user_id 4
+    And the LCD shows the therapy message (up to two lines of 16 characters)
+    And after a short hold the UI returns to entry mode
+    And the entry field is programmed to 0 minutes and 30 seconds
+    And the LCD top line shows the selected user with the recommended time
+
   Scenario: Digit for unknown user id does not load exposure
     Given the UI is paging the household user list
     And no listed user has id 9
@@ -276,6 +287,24 @@ Feature: Session timer entry and countdown
     Then the timer UI still works
     And wall clock may show that network time is unavailable
     And the device retries network periodically
+
+  # --- LAN OTA -------------------------------------------------------------
+
+  Scenario: Idle module can install firmware from the LAN server
+    Given the module has dual-OTA partitions from a prior USB flash
+    And Wi-Fi is connected and a server IP is known
+    And the UI is not in a running session
+    And the server hosts /firmware/session_timer/manifest.json with a newer version
+    When the module performs its periodic OTA check
+    Then it downloads app.bin over HTTP
+    And verifies the SHA-256 from the manifest
+    And reboots into the new OTA slot
+
+  Scenario: OTA is deferred while a session is running
+    Given a session is running with the lamp on
+    When an OTA check would otherwise run
+    Then the module does not start an OTA download
+    And the session continues uninterrupted
 
   # --- Safety defaults -----------------------------------------------------
 

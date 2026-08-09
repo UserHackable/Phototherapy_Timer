@@ -10,17 +10,21 @@
  *   - Piezo end beep GPIO25
  *   - Wi‑Fi from NVS; UDP JSON discovery for server ID + wall clock
  *   - Key A: user list; digit: therapy recommendation → loads MMSS entry
+ *   - Therapy reply optional "message" → show on 16x2 LCD, then entry UI
  *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
+ *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
  *   - SNTP public pools only if discovery does not supply time
  *   - LCD / TM1637 / keypad optional — run discovery headless if absent
  *   - If offline, timer-only and retry Wi‑Fi periodically
  *
  *   ./scripts/fw idf nvs-wifi
  *   ./scripts/fw idf upload session_timer
+ *   ./scripts/fw idf ota-publish session_timer   # after first USB flash
  *
  * Behavior: docs/features/session_timer.feature
  * Discovery: docs/device-discovery.md
+ * OTA: docs/ota.md
  */
 
 #include <stdio.h>
@@ -50,6 +54,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "tm1637.h"
+#include "uh_ota.h"
 
 static const char *TAG = "session_timer";
 
@@ -93,6 +98,10 @@ static const char *TAG = "session_timer";
 #define DISCOVERY_ATTEMPTS    3
 #define DISCOVERY_PERIOD_MS   (5 * 60 * 1000)
 #define DISCOVERY_BOOT_WAIT_MS 6000
+/** How often to poll LAN firmware when idle (not while lamp session). */
+#define OTA_CHECK_PERIOD_MS   (15 * 60 * 1000)
+/** Delay after boot before first OTA check (let discovery settle, mark valid). */
+#define OTA_BOOT_DELAY_MS     20000
 
 #define NVS_NS_WIFI     "wifi"
 #define NVS_KEY_SSID    "ssid"
@@ -113,6 +122,10 @@ typedef enum {
 #define USERS_PAGE_MS      1000
 #define USERS_MODE_MS      30000
 #define USERS_PAGE_MAX     10 /* max pages (one user per page worst case) */
+/** How long to hold a therapy reply message on the LCD before entry UI. */
+#define THERAPY_MSG_HOLD_MS 2500
+/** Buffer for optional therapy "message" (display uses at most 2×16). */
+#define THERAPY_MSG_CAP     64
 
 static lcd1602_t s_lcd;
 static bool s_lcd_ok;
@@ -143,6 +156,8 @@ static bool s_wifi_started;
 static int64_t s_last_sntp_us;
 static int64_t s_last_wifi_try_us;
 static int64_t s_last_discovery_us;
+static int64_t s_last_ota_check_us;
+static bool s_ota_boot_marked;
 
 static char s_device_identity[40];
 static char s_server_ip[16];
@@ -391,6 +406,59 @@ static void lcd_status(const char *line0, const char *line1)
     snprintf(s_lcd_cache1, sizeof(s_lcd_cache1), "%.16s", l1);
     lcd1602_print_line(&s_lcd, 0, s_lcd_cache0);
     lcd1602_print_line(&s_lcd, 1, s_lcd_cache1);
+}
+
+/**
+ * Fit a free-text server message onto the 16x2 LCD (left-aligned, up to 32 chars).
+ * Prefer breaking the first line at a space in columns 8–16.
+ */
+static void lcd_show_message(const char *msg)
+{
+    char l0[17];
+    char l1[17];
+
+    if (!msg) {
+        return;
+    }
+    while (*msg == ' ' || *msg == '\t' || *msg == '\n' || *msg == '\r') {
+        msg++;
+    }
+    if (msg[0] == '\0') {
+        return;
+    }
+
+    size_t len = strlen(msg);
+    if (len <= (size_t)LCD_COLS) {
+        snprintf(l0, sizeof(l0), "%s", msg);
+        l1[0] = '\0';
+        lcd_status(l0, l1);
+        return;
+    }
+
+    int break_at = LCD_COLS;
+    for (int i = LCD_COLS; i >= 8; i--) {
+        if (msg[i] == ' ' || msg[i] == '\t') {
+            break_at = i;
+            break;
+        }
+    }
+    /* Hard cut if no good space, or if the break left nothing for line 0. */
+    if (break_at < 1) {
+        break_at = LCD_COLS;
+    }
+
+    snprintf(l0, sizeof(l0), "%.*s", break_at, msg);
+    /* Trim trailing spaces from line 0 */
+    for (int i = (int)strlen(l0) - 1; i >= 0 && l0[i] == ' '; i--) {
+        l0[i] = '\0';
+    }
+
+    const char *rest = msg + break_at;
+    while (*rest == ' ' || *rest == '\t') {
+        rest++;
+    }
+    snprintf(l1, sizeof(l1), "%.16s", rest);
+    lcd_status(l0, l1);
 }
 
 /** Label for the selected person; "Guest" when none. */
@@ -894,6 +962,7 @@ static void discovery_task(void *arg)
 }
 
 static void ui_entry_refresh(void);
+static void ui_clock_refresh(void);
 static void ui_users_page_paint(void);
 
 /** Request users 1–9 from Rails (UDP JSON). Uses known server IP from discovery. */
@@ -1013,15 +1082,20 @@ static int find_user_index_by_id(int user_id)
 
 /**
  * Request recommended exposure for user_id from Rails (UDP therapy).
- * On success sets *out_sec and optional name buffer; returns true.
+ * On success sets *out_sec, optional name, and optional message buffers; returns true.
+ * message_out receives therapy reply "message" when present (may be set on error too).
  */
-static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t name_cap)
+static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t name_cap,
+                            char *message_out, size_t message_cap)
 {
     if (out_sec) {
         *out_sec = 0;
     }
     if (name_out && name_cap > 0) {
         name_out[0] = '\0';
+    }
+    if (message_out && message_cap > 0) {
+        message_out[0] = '\0';
     }
     if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
         ESP_LOGW(TAG, "therapy: no server");
@@ -1095,9 +1169,14 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
     const cJSON *rec = cJSON_GetObjectItemCaseSensitive(j, "recommended_seconds");
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
     if (!cJSON_IsString(type) || strcasecmp(type->valuestring, "therapy") != 0) {
         cJSON_Delete(j);
         return false;
+    }
+    if (message_out && message_cap > 0 && cJSON_IsString(message) && message->valuestring) {
+        strncpy(message_out, message->valuestring, message_cap - 1);
+        message_out[message_cap - 1] = '\0';
     }
     if (cJSON_IsString(err) && err->valuestring && err->valuestring[0] != '\0') {
         ESP_LOGW(TAG, "therapy error: %s", err->valuestring);
@@ -1233,6 +1312,25 @@ static void apply_therapy_entry(int user_id, const char *name, int sec)
     ui_entry_refresh();
 }
 
+/**
+ * If the therapy reply included a non-empty message, show it on the 16x2,
+ * hold briefly so it can be read, then restore the entry UI.
+ */
+static void show_therapy_message_if_any(const char *message)
+{
+    if (!message || message[0] == '\0') {
+        return;
+    }
+    ESP_LOGI(TAG, "therapy message: %s", message);
+    lcd_show_message(message);
+    note_input();
+    vTaskDelay(pdMS_TO_TICKS(THERAPY_MSG_HOLD_MS));
+    note_input();
+    if (s_state == ST_ENTRY) {
+        ui_entry_refresh();
+    }
+}
+
 /** In users mode: digit = user id (0 = Guest) → fetch therapy and load entry. */
 static void select_user_by_digit(char digit)
 {
@@ -1260,13 +1358,19 @@ static void select_user_by_digit(char digit)
 
     int sec = 0;
     char reply_name[24];
-    if (!request_therapy(user_id, &sec, reply_name, sizeof(reply_name))) {
-        lcd_status("Therapy fail", name_buf);
+    char message_buf[THERAPY_MSG_CAP];
+    if (!request_therapy(user_id, &sec, reply_name, sizeof(reply_name),
+                         message_buf, sizeof(message_buf))) {
+        if (message_buf[0] != '\0') {
+            lcd_show_message(message_buf);
+        } else {
+            lcd_status("Therapy fail", name_buf);
+        }
         note_input();
         /* Stay in users mode so they can try another digit or wait out. */
         s_state = ST_USERS;
         s_users_page_start_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(800));
+        vTaskDelay(pdMS_TO_TICKS(message_buf[0] ? THERAPY_MSG_HOLD_MS : 800));
         ui_users_page_paint();
         return;
     }
@@ -1275,6 +1379,7 @@ static void select_user_by_digit(char digit)
         name_buf[sizeof(name_buf) - 1] = '\0';
     }
     apply_therapy_entry(user_id, name_buf, sec);
+    show_therapy_message_if_any(message_buf);
 }
 
 /**
@@ -1448,6 +1553,98 @@ static void network_maintenance(void)
         s_last_wifi_try_us = now;
         ESP_LOGI(TAG, "Wi‑Fi reconnect attempt");
         esp_wifi_connect();
+    }
+}
+
+/**
+ * OTA safety gate: never flash while a UV session is running.
+ * Also skip while paging users (short interactive UI).
+ */
+static bool ota_may_start(void)
+{
+    if (s_state == ST_RUNNING) {
+        return false;
+    }
+    if (s_state == ST_USERS) {
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Poll LAN server for a newer session_timer image (HTTP + SHA-256).
+ * Blocks during download; only called when idle. Successful OTA reboots.
+ */
+static void maybe_ota_check(void)
+{
+    if (!s_have_ip) {
+        return;
+    }
+
+    const char *host = NULL;
+    if (s_have_server && s_server_ip[0] != '\0') {
+        host = s_server_ip;
+    } else if (s_server_ip_hint[0] != '\0') {
+        host = s_server_ip_hint;
+    }
+    if (!host) {
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    if (!s_ota_boot_marked) {
+        /* First window: mark image valid for rollback, then wait before OTA. */
+        if (now < (int64_t)OTA_BOOT_DELAY_MS * 1000) {
+            return;
+        }
+        uh_ota_mark_valid();
+        s_ota_boot_marked = true;
+        s_last_ota_check_us = now; /* first real check after another period half */
+        ESP_LOGI(TAG, "OTA: app marked valid; version=%s", uh_ota_running_version());
+        /* Still run a check soon after boot (half period) so publish → update is practical. */
+        s_last_ota_check_us = now - ((int64_t)OTA_CHECK_PERIOD_MS * 1000) / 2;
+    }
+
+    if ((now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
+        return;
+    }
+    if (!ota_may_start()) {
+        ESP_LOGD(TAG, "OTA: deferred (busy UI/session)");
+        return;
+    }
+
+    s_last_ota_check_us = now;
+
+    char base[40];
+    snprintf(base, sizeof(base), "http://%s", host);
+
+    uh_ota_config_t cfg = {
+        .base_url = base,
+        .app_name = "session_timer",
+        .may_start = ota_may_start,
+        .skip_if_same_version = true,
+    };
+
+    ESP_LOGI(TAG, "OTA check %s/firmware/session_timer/ (running %s)",
+             base, uh_ota_running_version());
+    lcd_status("Checking for", "update…");
+    esp_err_t err = uh_ota_check_and_update(&cfg);
+    /* Successful update reboots inside uh_ota — we only get here on no-op/fail. */
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "OTA: up to date");
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        ESP_LOGI(TAG, "OTA: no manifest/image on server yet");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "OTA: skipped (not safe to update now)");
+    } else {
+        ESP_LOGW(TAG, "OTA: %s", esp_err_to_name(err));
+    }
+
+    /* Restore UI after a failed/noop check (success already rebooted). */
+    if (s_state == ST_CLOCK) {
+        ui_clock_refresh();
+    } else if (s_state == ST_ENTRY) {
+        ui_entry_refresh();
     }
 }
 
@@ -1779,8 +1976,9 @@ static bool init_peripherals(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "session_timer lamp=%d fan=%d LED=%d piezo=%d",
-             SSR_GPIO, FAN_SSR_GPIO, LAMP_LED_GPIO, PIEZO_GPIO);
+    ESP_LOGI(TAG, "session_timer lamp=%d fan=%d LED=%d piezo=%d version=%s",
+             SSR_GPIO, FAN_SSR_GPIO, LAMP_LED_GPIO, PIEZO_GPIO,
+             uh_ota_running_version());
 
     esp_err_t nvs = nvs_flash_init();
     if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1872,6 +2070,7 @@ void app_main(void)
 
         network_maintenance();
         tick_fan_rundown();
+        maybe_ota_check();
 
         /* Headless bench: periodic status (no keypad/LCD). */
         if (!s_kp_ok && !s_lcd_ok) {

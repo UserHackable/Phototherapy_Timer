@@ -4,8 +4,8 @@ LAN over-the-air firmware updates for product apps so an installed module does
 not need USB access for routine upgrades.
 
 Status: **dual-OTA partitions + `uh_ota` + `ota_smoke` + Rails publish proven
-on hardware** (SHA-256 OK, reboot into new slot). `session_timer` product
-integration (safety gates) is next.
+on hardware** (SHA-256 OK, reboot into new slot). **`session_timer` runs LAN
+OTA when idle** (not during a lamp session or user-list paging).
 
 ## Why
 
@@ -35,17 +35,43 @@ Changing the partition table **requires a full serial flash** (not app-only):
 ./scripts/fw idf nvs-wifi    # if NVS was erased or first provision
 ```
 
-After that, future updates target the inactive OTA slot (once the OTA client is wired).
+After that, future updates target the inactive OTA slot via LAN OTA.
 
 ## Apps using the OTA table
 
 | App | Notes |
 |-----|--------|
-| `session_timer` | Product UI + discovery; OTA client TBD |
+| `session_timer` | Product UI + discovery; **checks OTA ~every 15 min when idle** |
 | `wifi_connect` | Bring-up / discovery; same table for consistency |
 | `ota_smoke` | Minimal proof: Wi‑Fi + `uh_ota` against NVS `server_ip` |
 
 Other apps may stay on single-app until needed.
+
+### Product app (`session_timer`)
+
+1. **One-time USB** full flash (dual-OTA table) + `nvs-wifi` if needed.
+2. Module discovers the Rails host (UDP) or uses NVS `discovery/server_ip`.
+3. When **not** running a session (and not in key-A user list), it GETs  
+   `http://<server>/firmware/session_timer/manifest.json`.
+4. If `version` differs (or `force`), downloads `app.bin`, verifies **SHA-256**,
+   writes the inactive slot, reboots.
+5. After a healthy boot it marks the image valid (bootloader rollback cancelled).
+
+Publish a new build from a machine with the toolchain and SSH to ami:
+
+```bash
+./scripts/fw idf ota-publish session_timer
+# force re-flash same git short version:
+OTA_FORCE=1 ./scripts/fw idf ota-publish session_timer
+```
+
+Serial (optional) while testing:
+
+```text
+OTA check http://192.168.1.202/firmware/session_timer/ (running …)
+uh_ota: SHA-256 OK
+uh_ota: OTA complete — rebooting into ota_1
+```
 
 ### Smoke test (bench)
 
@@ -73,23 +99,24 @@ Other apps may stay on single-app until needed.
 
 Shared client: `esp32_firmware/components/uh_ota/`.
 
-## Trust model (planned)
+## Trust model
 
 | Layer | Approach |
 |-------|----------|
 | Transport | **HTTP on LAN** (`CONFIG_OTA_ALLOW_HTTP`) |
 | Integrity | **SHA-256** in `manifest.json` |
 | Host | Discovered server IP / NVS hint — no hard-coded LAN IP in C |
-| Safety | No OTA while lamps/session running; mark app valid after healthy boot (rollback) |
+| Safety | No OTA while session running or users list open; mark app valid after healthy boot (rollback) |
+| Auth | Unauthenticated on private LAN (same as discovery UDP) — do not expose to the internet |
 
-## Publish surface (planned)
+## Publish surface
 
 ```text
 GET http://<server>/firmware/<app>/manifest.json
 GET http://<server>/firmware/<app>/app.bin
 ```
 
-CLI (planned): `./scripts/fw idf ota-publish <app>`
+CLI: `./scripts/fw idf ota-publish <app>` (builds, writes manifest, copies into ami Rails volume).
 
 ## Related
 

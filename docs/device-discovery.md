@@ -32,7 +32,9 @@ UTF-8 JSON objects (single datagram, no framing):
 {"v":1,"type":"therapy","identity":"esp32-b4bfe9e70e64","user_id":4}
 
 // Server → ESP (default recommended_seconds is 30 until per-user schedules exist)
-{"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30}
+// Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
+{"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30,
+ "message":"Last session 2d ago"}
 
 // ESP → server when the lamp turns off (complete or abort with ≥1 s on)
 {"v":1,"type":"exposure","identity":"esp32-…","user_id":0,"duration_seconds":28,"unix":1721830496}
@@ -55,6 +57,7 @@ UTF-8 JSON objects (single datagram, no framing):
 | `users` | users reply | Household ids 1–9, then **`{id:0,name:"Guest"}` last** |
 | `user_id` | therapy / exposure | Key digit **0–9** (0 = Guest) |
 | `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry |
+| `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held briefly) |
 | `duration_seconds` | exposure | Actual lamp-on seconds for this run |
 | `error` | therapy / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"bad_duration"` |
 

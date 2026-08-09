@@ -52,6 +52,7 @@ PORT=/dev/ttyUSB1 ./scripts/fw idf upload wifi_scan
 | `wifi_scan` | STA scan; print APs (no secrets) |
 | `wifi_connect` | NVS Wi‑Fi + DHCP + SNTP on UART (credentials via `nvs-wifi`) |
 | `ota_smoke` | Dual-OTA partition + `uh_ota` LAN check (proof; see [docs/ota.md](../docs/ota.md)) |
+| `session_timer` | Product UI; LAN OTA when idle via `uh_ota` (publish: `./scripts/fw idf ota-publish session_timer`) |
 
 Add an app: copy `apps/blink`, rename `project(…)` in `CMakeLists.txt`, replace `main/main.c`.
 
