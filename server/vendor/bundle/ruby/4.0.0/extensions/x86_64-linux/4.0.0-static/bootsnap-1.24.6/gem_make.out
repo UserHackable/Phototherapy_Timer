@@ -1,0 +1,23 @@
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bootsnap-1.24.6/ext/bootsnap
+/home/rob/.local/share/mise/installs/ruby/4.0.6/bin/ruby extconf.rb
+checking for fdatasync() in unistd.h... yes
+checking for fstatat() in sys/stat.h... yes
+checking for whether -D_GNU_SOURCE is accepted as CPPFLAGS... yes
+checking for whether -O3 is accepted as CFLAGS... yes
+checking for whether -std=c99 is accepted as CFLAGS... yes
+creating Makefile
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bootsnap-1.24.6/ext/bootsnap
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-58q836 sitelibdir\=./.gem.20260810-1191910-58q836 clean
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bootsnap-1.24.6/ext/bootsnap
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-58q836 sitelibdir\=./.gem.20260810-1191910-58q836
+compiling bootsnap.c
+linking shared-object bootsnap/bootsnap.so
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bootsnap-1.24.6/ext/bootsnap
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-58q836 sitelibdir\=./.gem.20260810-1191910-58q836 install
+/usr/bin/install -c -m 0755 bootsnap.so ./.gem.20260810-1191910-58q836/bootsnap
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bootsnap-1.24.6/ext/bootsnap
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-58q836 sitelibdir\=./.gem.20260810-1191910-58q836 clean

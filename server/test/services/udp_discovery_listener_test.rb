@@ -115,8 +115,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal "therapy", data["type"]
     assert_equal user.id, data["user_id"]
     assert_equal user.name, data["name"]
-    assert_equal UdpDiscoveryListener::DEFAULT_RECOMMENDED_SECONDS, data["recommended_seconds"]
-    assert_equal 30, data["recommended_seconds"]
+    assert data["recommended_seconds"].is_a?(Integer)
+    assert data["recommended_seconds"] >= 0
     assert_not data.key?("error")
     assert data["message"].present?
     assert_match(/Last session|No prior session/, data["message"])
@@ -128,7 +128,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   test "handle_packet therapy message reports last session age" do
     user = users(:one)
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      user.exposures.destroy_all
+      Exposure.where(user_id: user.id).delete_all
       Exposure.create!(
         user: user,
         started_at: Time.zone.parse("2026-08-10 02:16:00"),
@@ -140,20 +140,47 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
         "192.168.50.47"
       )
       data = JSON.parse(reply)
-      lines = data["message"].split("
-", 2)
+      lines = data["message"].split("\n", 2)
       assert_equal "Last session", lines[0]
       assert_match(/1:30/, lines[1])
-      assert_match(/0d/, lines[1])
+      assert_no_match(/0d/, lines[1])
       assert_match(/ago/, lines[1])
       assert_operator lines[1].length, :<=, 16
-      assert_equal 30, data["recommended_seconds"]
+      assert_equal 0, data["recommended_seconds"]
+    end
+  end
+
+  test "handle_packet therapy recommends zero when last exposure recent" do
+    user = users(:one)
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      Exposure.where(user_id: user.id).delete_all
+      Exposure.create!(user: user, started_at: 10.hours.ago, duration_seconds: 105)
+      reply = @listener.handle_packet(
+        UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-recent", user_id: user.id),
+        "192.168.50.50"
+      )
+      data = JSON.parse(reply)
+      assert_equal 0, data["recommended_seconds"]
+    end
+  end
+
+  test "handle_packet therapy recommends last duration after 44 hours" do
+    user = users(:one)
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      Exposure.where(user_id: user.id).delete_all
+      Exposure.create!(user: user, started_at: 50.hours.ago, duration_seconds: 105)
+      reply = @listener.handle_packet(
+        UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-old", user_id: user.id),
+        "192.168.50.49"
+      )
+      data = JSON.parse(reply)
+      assert_equal 105, data["recommended_seconds"]
     end
   end
 
   test "handle_packet therapy message when user has no exposures" do
     user = users(:one)
-    user.exposures.destroy_all
+    Exposure.where(user_id: user.id).delete_all
     reply = @listener.handle_packet(
       UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-none", user_id: user.id),
       "192.168.50.48"

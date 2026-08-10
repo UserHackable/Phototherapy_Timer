@@ -1,0 +1,41 @@
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bcrypt_pbkdf-1.1.2/ext/mri
+/home/rob/.local/share/mise/installs/ruby/4.0.6/bin/ruby extconf.rb
+creating Makefile
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bcrypt_pbkdf-1.1.2/ext/mri
+make -j2 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-5qmsbv sitelibdir\=./.gem.20260810-1191910-5qmsbv clean
+make: warning: -j2 forced in submake: resetting jobserver mode.
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bcrypt_pbkdf-1.1.2/ext/mri
+make -j2 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-5qmsbv sitelibdir\=./.gem.20260810-1191910-5qmsbv
+make: warning: -j2 forced in submake: resetting jobserver mode.
+compiling bcrypt_pbkdf.c
+compiling bcrypt_pbkdf_ext.c
+bcrypt_pbkdf.c: In function ‘bcrypt_hash’:
+bcrypt_pbkdf.c:61:13: warning: initializer-string for array of ‘unsigned char’ truncates NUL terminator but destination lacks ‘nonstring’ attribute (33 chars into 32 available) [-Wunterminated-string-initialization]
+   61 |             "OxychromaticBlowfishSwatDynamite";
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
+bcrypt_pbkdf_ext.c: In function ‘Init_bcrypt_pbkdf_ext’:
+bcrypt_pbkdf_ext.c:38:6: warning: old-style function definition [-Wold-style-definition]
+   38 | void Init_bcrypt_pbkdf_ext(){
+      |      ^~~~~~~~~~~~~~~~~~~~~
+compiling blowfish.c
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
+compiling explicit_bzero.c
+compiling hash_sha512.c
+linking shared-object bcrypt_pbkdf_ext.so
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bcrypt_pbkdf-1.1.2/ext/mri
+make -j2 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-5qmsbv sitelibdir\=./.gem.20260810-1191910-5qmsbv install
+make: warning: -j2 forced in submake: resetting jobserver mode.
+/usr/bin/install -c -m 0755 bcrypt_pbkdf_ext.so ./.gem.20260810-1191910-5qmsbv
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bcrypt_pbkdf-1.1.2/ext/mri
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-5qmsbv sitelibdir\=./.gem.20260810-1191910-5qmsbv clean

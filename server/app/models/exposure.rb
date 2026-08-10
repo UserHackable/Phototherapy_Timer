@@ -1,6 +1,9 @@
 class Exposure < ApplicationRecord
   belongs_to :user
 
+  # If last session is this old or older, recommend its duration; else recommend 0.
+  THERAPY_REUSE_AFTER = 44.hours
+
   validates :started_at, presence: true
   validates :duration_seconds, presence: true,
                                numericality: { only_integer: true, greater_than: 0 }
@@ -28,43 +31,29 @@ class Exposure < ApplicationRecord
     ActiveSupport::Duration.build(now - started_at)
   end
 
-  # Always "0d 9h 44m" style for the module second LCD line.
-  def ago_dhm
+  def age_seconds
     raise ArgumentError, "started_at required" if started_at.blank?
 
     total = (Time.zone.now - started_at).to_i
-    total = 0 if total.negative?
+    total.negative? ? 0 : total
+  end
+
+  # Compact age for LCD: omit zero units (e.g. 10h 8m, 45m, 2d 3h).
+  def ago_dhm
+    total = age_seconds
     days = total / 86_400
     hours = (total % 86_400) / 3_600
     minutes = (total % 3_600) / 60
-    "#{days}d #{hours}h #{minutes}m"
+    parts = []
+    parts << "#{days}d" if days.positive?
+    parts << "#{hours}h" if hours.positive?
+    parts << "#{minutes}m" if minutes.positive?
+    return "just now" if parts.empty?
+
+    parts.join(" ")
   end
 
-  # Compact age (tests / logs). Prefer ago_dhm for LCD.
-  def ago_compact
-    raise ArgumentError, "started_at required" if started_at.blank?
-
-    total = (Time.zone.now - started_at).to_i
-    total = 0 if total.negative?
-    return "just now" if total < 60
-
-    minutes = total / 60
-    return "#{minutes}m" if minutes < 60
-
-    hours = minutes / 60
-    return "#{hours}h" if hours < 24
-
-    days = hours / 24
-    rem_h = hours % 24
-    return "#{days}d #{rem_h}h" if days < 14 && rem_h.positive?
-    return "#{days}d" if days < 60
-
-    weeks = days / 7
-    "#{weeks}w"
-  end
-
-  # Second LCD line: duration + age, max 16 chars (HD44780 width).
-  # Prefer "ago"; tighten "0d 9h 44m" -> "0d9h44m" when needed to fit.
+  # Second LCD line: duration + age, max 16 chars.
   def last_session_detail_line
     age = ago_dhm
     candidates = [
@@ -81,16 +70,27 @@ class Exposure < ApplicationRecord
       newest_first.first
     end
 
-    # Two-line therapy UDP `message` for session_timer 16x2 (\n splits lines).
-    #   Last session
-    #   1:30 0d 9h 44m ago
     def last_session_message_for(user)
       return "No prior session" if user.nil?
 
-      exp = user.exposures.newest_first.first
+      exp = where(user_id: user.id).newest_first.first
       return "No prior session" if exp.nil?
 
       "Last session\n#{exp.last_session_detail_line}"
+    end
+
+    def recommended_seconds_for(user, default_seconds: 30)
+      return default_seconds if user.nil?
+
+      exp = where(user_id: user.id).newest_first.first
+      return default_seconds if exp.nil?
+
+      elapsed = (Time.zone.now - exp.started_at).to_f
+      if elapsed >= THERAPY_REUSE_AFTER.to_f
+        exp.duration_seconds
+      else
+        0
+      end
     end
   end
 end

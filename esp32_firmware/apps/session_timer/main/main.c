@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -123,9 +124,13 @@ typedef enum {
 #define USERS_MODE_MS      30000
 #define USERS_PAGE_MAX     10 /* max pages (one user per page worst case) */
 /** How long to hold a therapy reply message on the LCD before entry UI. */
-#define THERAPY_MSG_HOLD_MS 30000
+#define THERAPY_MSG_HOLD_MS 5000
 /** Buffer for optional therapy "message" (display uses at most 2×16). */
 #define THERAPY_MSG_CAP     64
+
+/** Bottom LCD line kept after therapy message (last exposure detail). */
+static char s_last_session_bottom[17];
+static bool s_have_last_session_bottom;
 
 static lcd1602_t s_lcd;
 static bool s_lcd_ok;
@@ -1202,7 +1207,7 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
         cJSON_Delete(j);
         return false;
     }
-    if (!cJSON_IsNumber(rec) || rec->valuedouble < 1) {
+    if (!cJSON_IsNumber(rec) || rec->valuedouble < 0) {
         cJSON_Delete(j);
         return false;
     }
@@ -1328,16 +1333,60 @@ static void apply_therapy_entry(int user_id, const char *name, int sec)
     note_input();
     ESP_LOGI(TAG, "therapy applied user_id=%d name=%s entry=%d (%ds)",
              user_id, s_selected_user_name, s_entry, sec);
-    ui_entry_refresh();
+    /* LCD painted by show_therapy_message_if_any (or caller). */
 }
 
 /**
- * If the therapy reply included a non-empty message, show it on the 16x2,
- * hold 30s so it can be read, then restore the entry UI.
+ * Therapy message hold, then entry top line with last-session bottom sticky.
  */
+static void capture_last_session_bottom(const char *message)
+{
+    s_have_last_session_bottom = false;
+    s_last_session_bottom[0] = '\0';
+    if (!message || message[0] == '\0') {
+        return;
+    }
+    const char *nl = strchr(message, '\n');
+    const char *detail = nl ? (nl + 1) : message;
+    while (*detail == ' ' || *detail == '\t' || *detail == '\r') {
+        detail++;
+    }
+    if (detail[0] == '\0') {
+        return;
+    }
+    if (!nl && strcasecmp(detail, "No prior session") == 0) {
+        return;
+    }
+    snprintf(s_last_session_bottom, sizeof(s_last_session_bottom), "%.16s", detail);
+    s_have_last_session_bottom = true;
+}
+
+static void ui_entry_paint_top_keep_bottom(void)
+{
+    int mm, ss;
+    entry_to_mmss(s_entry, &mm, &ss);
+    int sec_show = ss > 59 ? 59 : ss;
+    show_led_mmss(mm, sec_show, true);
+
+    char l0[17], l1[17];
+    format_user_time_line(l0, sizeof(l0), mm, sec_show);
+    if (s_have_last_session_bottom && s_last_session_bottom[0] != '\0') {
+        snprintf(l1, sizeof(l1), "%.16s", s_last_session_bottom);
+    } else if (s_after_complete && (s_entry_digits > 0 || s_entry > 0)) {
+        snprintf(l1, sizeof(l1), "* clear repeat #");
+    } else {
+        snprintf(l1, sizeof(l1), "* clear  start #");
+    }
+    lcd_status(l0, l1);
+}
+
 static void show_therapy_message_if_any(const char *message)
 {
+    capture_last_session_bottom(message);
     if (!message || message[0] == '\0') {
+        if (s_state == ST_ENTRY) {
+            ui_entry_paint_top_keep_bottom();
+        }
         return;
     }
     ESP_LOGI(TAG, "therapy message: %s", message);
@@ -1346,7 +1395,7 @@ static void show_therapy_message_if_any(const char *message)
     vTaskDelay(pdMS_TO_TICKS(THERAPY_MSG_HOLD_MS));
     note_input();
     if (s_state == ST_ENTRY) {
-        ui_entry_refresh();
+        ui_entry_paint_top_keep_bottom();
     }
 }
 
@@ -1665,21 +1714,7 @@ static void maybe_ota_check(void)
 
 static void ui_entry_refresh(void)
 {
-    int mm, ss;
-    entry_to_mmss(s_entry, &mm, &ss);
-    int sec_show = ss > 59 ? 59 : ss;
-    show_led_mmss(mm, sec_show, true);
-
-    char l0[17], l1[17];
-    /* Top: selected user (or Guest) left, programmed time right. */
-    format_user_time_line(l0, sizeof(l0), mm, sec_show);
-    /* * left / # right — matches keypad sides; full 16 cols */
-    if (s_after_complete && (s_entry_digits > 0 || s_entry > 0)) {
-        snprintf(l1, sizeof(l1), "* clear repeat #");
-    } else {
-        snprintf(l1, sizeof(l1), "* clear  start #");
-    }
-    lcd_status(l0, l1);
+    ui_entry_paint_top_keep_bottom();
 }
 
 static void ui_running_refresh(void)
@@ -1745,6 +1780,8 @@ static void clear_entry(void)
     s_entry_digits = DEFAULT_ENTRY_DIGITS;
     s_entry_fresh = true;
     s_after_complete = false;
+    s_have_last_session_bottom = false;
+    s_last_session_bottom[0] = '\0';
 }
 
 static void start_session(void)
@@ -1756,6 +1793,8 @@ static void start_session(void)
         note_input();
         return;
     }
+    s_have_last_session_bottom = false;
+    s_last_session_bottom[0] = '\0';
     s_remain_sec = total;
     s_session_planned_sec = total;
     s_session_user_id = s_selected_user_id > 0 ? s_selected_user_id : 0;

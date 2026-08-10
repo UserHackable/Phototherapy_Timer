@@ -1,0 +1,73 @@
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bigdecimal-4.1.2/ext/bigdecimal
+/home/rob/.local/share/mise/installs/ruby/4.0.6/bin/ruby extconf.rb
+checking for __builtin_clz()... yes
+checking for __builtin_clzl()... yes
+checking for __builtin_clzll()... yes
+checking for float.h... yes
+checking for math.h... yes
+checking for stdbool.h... yes
+checking for stdlib.h... yes
+checking for x86intrin.h... yes
+checking for _lzcnt_u32() in x86intrin.h... no
+checking for _lzcnt_u64() in x86intrin.h... no
+checking for intrin.h... no
+checking for ruby/atomic.h... yes
+checking for ruby/internal/has/builtin.h... yes
+checking for ruby/internal/static_assert.h... yes
+checking for rb_complex_real() in ruby.h... yes
+checking for rb_complex_imag() in ruby.h... yes
+checking for rb_opts_exception_p() in ruby.h... yes
+checking for rb_category_warn() in ruby.h... yes
+checking for RB_WARN_CATEGORY_DEPRECATED in ruby.h... yes
+checking for RUBY_TYPED_EMBEDDABLE in ruby.h... yes
+creating Makefile
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bigdecimal-4.1.2/ext/bigdecimal
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-dnlqlm sitelibdir\=./.gem.20260810-1191910-dnlqlm clean
+make: warning: -j3 forced in submake: resetting jobserver mode.
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bigdecimal-4.1.2/ext/bigdecimal
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-dnlqlm sitelibdir\=./.gem.20260810-1191910-dnlqlm
+make: warning: -j3 forced in submake: resetting jobserver mode.
+compiling bigdecimal.c
+compiling missing.c
+In file included from missing.c:28:
+missing/dtoa.c: In function ‘BigDecimal_strtod’:
+missing/dtoa.c:1506:18: warning: this statement may fall through [-Wimplicit-fallthrough=]
+ 1506 |             sign = 1;
+      |             ~~~~~^~~
+missing/dtoa.c:1508:11: note: here
+ 1508 |           case '+':
+      |           ^~~~
+missing/dtoa.c:1664:19: warning: this statement may fall through [-Wimplicit-fallthrough=]
+ 1664 |             esign = 1;
+      |             ~~~~~~^~~
+missing/dtoa.c:1665:11: note: here
+ 1665 |           case '+':
+      |           ^~~~
+missing/dtoa.c: In function ‘BigDecimal_dtoa’:
+missing/dtoa.c:2859:19: warning: this statement may fall through [-Wimplicit-fallthrough=]
+ 2859 |         leftright = 0;
+      |         ~~~~~~~~~~^~~
+missing/dtoa.c:2861:7: note: here
+ 2861 |       case 4:
+      |       ^~~~
+missing/dtoa.c:2867:19: warning: this statement may fall through [-Wimplicit-fallthrough=]
+ 2867 |         leftright = 0;
+      |         ~~~~~~~~~~^~~
+missing/dtoa.c:2869:7: note: here
+ 2869 |       case 5:
+      |       ^~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
+linking shared-object bigdecimal.so
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bigdecimal-4.1.2/ext/bigdecimal
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-dnlqlm sitelibdir\=./.gem.20260810-1191910-dnlqlm install
+make: warning: -j3 forced in submake: resetting jobserver mode.
+/usr/bin/install -c -m 0755 bigdecimal.so ./.gem.20260810-1191910-dnlqlm
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/bigdecimal-4.1.2/ext/bigdecimal
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-dnlqlm sitelibdir\=./.gem.20260810-1191910-dnlqlm clean

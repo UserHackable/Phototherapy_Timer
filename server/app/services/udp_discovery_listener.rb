@@ -215,7 +215,10 @@ class UdpDiscoveryListener
           {
             user_id: user.id,
             name: user.name,
-            recommended_seconds: DEFAULT_RECOMMENDED_SECONDS,
+            recommended_seconds: Exposure.recommended_seconds_for(
+              user,
+              default_seconds: DEFAULT_RECOMMENDED_SECONDS
+            ),
             message: Exposure.last_session_message_for(user)
           }
         else
@@ -434,7 +437,7 @@ class UdpDiscoveryListener
       user_id: user_id
     }
     payload[:name] = name if name.present?
-    payload[:recommended_seconds] = recommended_seconds if recommended_seconds
+    payload[:recommended_seconds] = recommended_seconds unless recommended_seconds.nil?
     payload[:error] = error if error.present?
     # Free-text note for the module 16x2 (session_timer shows then returns to entry).
     payload[:message] = message if message.present?

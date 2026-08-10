@@ -1,0 +1,29 @@
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/websocket-driver-0.8.2/ext/websocket-driver
+/home/rob/.local/share/mise/installs/ruby/4.0.6/bin/ruby extconf.rb
+creating Makefile
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/websocket-driver-0.8.2/ext/websocket-driver
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-yi4luh sitelibdir\=./.gem.20260810-1191910-yi4luh clean
+make: warning: -j3 forced in submake: resetting jobserver mode.
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/websocket-driver-0.8.2/ext/websocket-driver
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-yi4luh sitelibdir\=./.gem.20260810-1191910-yi4luh
+make: warning: -j3 forced in submake: resetting jobserver mode.
+compiling websocket_mask.c
+websocket_mask.c: In function ‘Init_websocket_mask’:
+websocket_mask.c:26:6: warning: old-style function definition [-Wold-style-definition]
+   26 | void Init_websocket_mask()
+      |      ^~~~~~~~~~~~~~~~~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
+linking shared-object websocket_mask.so
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/websocket-driver-0.8.2/ext/websocket-driver
+make -j3 DESTDIR\= sitearchdir\=./.gem.20260810-1191910-yi4luh sitelibdir\=./.gem.20260810-1191910-yi4luh install
+make: warning: -j3 forced in submake: resetting jobserver mode.
+/usr/bin/install -c -m 0755 websocket_mask.so ./.gem.20260810-1191910-yi4luh
+
+current directory: /home/rob/UserHackable/Phototherapy_Timer/server/vendor/bundle/ruby/4.0.0/gems/websocket-driver-0.8.2/ext/websocket-driver
+make DESTDIR\= sitearchdir\=./.gem.20260810-1191910-yi4luh sitelibdir\=./.gem.20260810-1191910-yi4luh clean
