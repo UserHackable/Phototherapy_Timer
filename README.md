@@ -16,6 +16,7 @@ Planned beyond stock:
 
 - Device: [SolRx E-Series Master (medium frame)](https://solarcsystems.com/product/medium-frame-solrx-e-series-master/)
 - Manufacturer user manual (E760 / E-Series UVBNB, Rev 3.3A May 2026): [docs/E760-E-Series-UVBNB-Users-Manual-Rev3.3A-May2026.pdf](docs/E760-E-Series-UVBNB-Users-Manual-Rev3.3A-May2026.pdf)
+- Extracted markdown + images: [docs/e760-users-manual/](docs/e760-users-manual/)
 - Manufacturer: [Solarc Systems](https://solarcsystems.com/) (Canadian)
 - Right to repair: [solarcsystems.com/right-to-repair](https://solarcsystems.com/right-to-repair/)
 
