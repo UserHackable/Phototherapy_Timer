@@ -33,6 +33,7 @@ UTF-8 JSON objects (single datagram, no framing):
 
 // Server → ESP (default recommended_seconds is 30 until per-user schedules exist)
 // Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
+// Server fills message from that user's newest Exposure (e.g. "Last session 1d 22h ago").
 {"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30,
  "message":"Last session 2d ago"}
 

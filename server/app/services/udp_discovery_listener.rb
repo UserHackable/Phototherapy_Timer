@@ -215,7 +215,8 @@ class UdpDiscoveryListener
           {
             user_id: user.id,
             name: user.name,
-            recommended_seconds: DEFAULT_RECOMMENDED_SECONDS
+            recommended_seconds: DEFAULT_RECOMMENDED_SECONDS,
+            message: Exposure.last_session_message_for(user)
           }
         else
           { user_id: user_id, name: nil, recommended_seconds: nil, error: "not_found" }

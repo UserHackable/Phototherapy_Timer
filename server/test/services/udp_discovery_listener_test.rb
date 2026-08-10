@@ -106,6 +106,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
 
   test "handle_packet therapy returns default recommended_seconds" do
     user = users(:one)
+    # Fixture exposure exists for :one — expect last-session message.
     reply = @listener.handle_packet(
       UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy", user_id: user.id),
       "192.168.50.40"
@@ -117,10 +118,38 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal UdpDiscoveryListener::DEFAULT_RECOMMENDED_SECONDS, data["recommended_seconds"]
     assert_equal 30, data["recommended_seconds"]
     assert_not data.key?("error")
-    assert_not data.key?("message")
+    assert data["message"].present?
+    assert_match(/Last session |No prior session/, data["message"])
 
     device = Device.find_by!(identity: "esp-therapy")
     assert_equal "192.168.50.40", device.ip
+  end
+
+  test "handle_packet therapy message reports last session age" do
+    user = users(:one)
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      user.exposures.destroy_all
+      Exposure.create!(user: user, started_at: 2.days.ago, duration_seconds: 90)
+
+      reply = @listener.handle_packet(
+        UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-age", user_id: user.id),
+        "192.168.50.47"
+      )
+      data = JSON.parse(reply)
+      assert_equal "Last session 2d ago", data["message"]
+      assert_equal 30, data["recommended_seconds"]
+    end
+  end
+
+  test "handle_packet therapy message when user has no exposures" do
+    user = users(:one)
+    user.exposures.destroy_all
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-none", user_id: user.id),
+      "192.168.50.48"
+    )
+    data = JSON.parse(reply)
+    assert_equal "No prior session", data["message"]
   end
 
   test "build_therapy_reply includes optional message for module LCD" do
