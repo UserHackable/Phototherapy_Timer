@@ -45,6 +45,13 @@ This is a machine extract for searchability. The PDF remains authoritative.
 
 - [images/](images/) — 214 bitmaps + [images/README.md](images/README.md)
 
+## Gherkin requirements (E760M single panel)
+
+Household configuration: **E760M MASTER, 6 bulbs, no add-on panels**.
+
+See [features/](features/) for Cucumber/Gherkin contracts derived from this manual
+(therapy modes, stock timer, procedure, body positions, gap rules, maintenance).
+
 ## Original PDF
 
 - [../E760-E-Series-UVBNB-Users-Manual-Rev3.3A-May2026.pdf](../E760-E-Series-UVBNB-Users-Manual-Rev3.3A-May2026.pdf)
