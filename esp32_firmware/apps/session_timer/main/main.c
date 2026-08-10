@@ -410,7 +410,8 @@ static void lcd_status(const char *line0, const char *line1)
 
 /**
  * Fit a free-text server message onto the 16x2 LCD (left-aligned, up to 32 chars).
- * Prefer breaking the first line at a space in columns 8–16.
+ * Explicit newline forces line break (therapy last-session layout).
+ * Otherwise prefer breaking the first line at a space in columns 8-16.
  */
 static void lcd_show_message(const char *msg)
 {
@@ -424,6 +425,26 @@ static void lcd_show_message(const char *msg)
         msg++;
     }
     if (msg[0] == '\0') {
+        return;
+    }
+
+    /* Prefer explicit two-line layout from the server. */
+    const char *nl = strchr(msg, '\n');
+    if (nl) {
+        size_t n0 = (size_t)(nl - msg);
+        if (n0 > (size_t)LCD_COLS) {
+            n0 = (size_t)LCD_COLS;
+        }
+        snprintf(l0, sizeof(l0), "%.*s", (int)n0, msg);
+        for (int i = (int)strlen(l0) - 1; i >= 0 && l0[i] == ' '; i--) {
+            l0[i] = '\0';
+        }
+        const char *rest = nl + 1;
+        while (*rest == ' ' || *rest == '\t' || *rest == '\r') {
+            rest++;
+        }
+        snprintf(l1, sizeof(l1), "%.16s", rest);
+        lcd_status(l0, l1);
         return;
     }
 
@@ -442,13 +463,11 @@ static void lcd_show_message(const char *msg)
             break;
         }
     }
-    /* Hard cut if no good space, or if the break left nothing for line 0. */
     if (break_at < 1) {
         break_at = LCD_COLS;
     }
 
     snprintf(l0, sizeof(l0), "%.*s", break_at, msg);
-    /* Trim trailing spaces from line 0 */
     for (int i = (int)strlen(l0) - 1; i >= 0 && l0[i] == ' '; i--) {
         l0[i] = '\0';
     }

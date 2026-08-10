@@ -119,7 +119,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 30, data["recommended_seconds"]
     assert_not data.key?("error")
     assert data["message"].present?
-    assert_match(/Last session |No prior session/, data["message"])
+    assert_match(/Last session|No prior session/, data["message"])
 
     device = Device.find_by!(identity: "esp-therapy")
     assert_equal "192.168.50.40", device.ip
@@ -129,14 +129,24 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     user = users(:one)
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
       user.exposures.destroy_all
-      Exposure.create!(user: user, started_at: 2.days.ago, duration_seconds: 90)
+      Exposure.create!(
+        user: user,
+        started_at: Time.zone.parse("2026-08-10 02:16:00"),
+        duration_seconds: 90
+      )
 
       reply = @listener.handle_packet(
         UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-age", user_id: user.id),
         "192.168.50.47"
       )
       data = JSON.parse(reply)
-      assert_equal "Last session 2d ago", data["message"]
+      lines = data["message"].split("
+", 2)
+      assert_equal "Last session", lines[0]
+      assert_match(/1:30/, lines[1])
+      assert_match(/0d/, lines[1])
+      assert_match(/ago/, lines[1])
+      assert_operator lines[1].length, :<=, 16
       assert_equal 30, data["recommended_seconds"]
     end
   end

@@ -35,7 +35,7 @@ UTF-8 JSON objects (single datagram, no framing):
 // Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
 // Server fills message from that user's newest Exposure (e.g. "Last session 1d 22h ago").
 {"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30,
- "message":"Last session 2d ago"}
+ "message":"Last session\n1:30 0d9h44m ago"}
 
 // ESP → server when the lamp turns off (complete or abort with ≥1 s on)
 {"v":1,"type":"exposure","identity":"esp32-…","user_id":0,"duration_seconds":28,"unix":1721830496}

@@ -28,8 +28,19 @@ class Exposure < ApplicationRecord
     ActiveSupport::Duration.build(now - started_at)
   end
 
-  # Compact age for module LCD therapy message (fits 16x2 with "Last session … ago").
-  # Examples: "just now", "45m", "22h", "1d 22h", "3d", "2w".
+  # Always "0d 9h 44m" style for the module second LCD line.
+  def ago_dhm
+    raise ArgumentError, "started_at required" if started_at.blank?
+
+    total = (Time.zone.now - started_at).to_i
+    total = 0 if total.negative?
+    days = total / 86_400
+    hours = (total % 86_400) / 3_600
+    minutes = (total % 3_600) / 60
+    "#{days}d #{hours}h #{minutes}m"
+  end
+
+  # Compact age (tests / logs). Prefer ago_dhm for LCD.
   def ago_compact
     raise ArgumentError, "started_at required" if started_at.blank?
 
@@ -52,20 +63,34 @@ class Exposure < ApplicationRecord
     "#{weeks}w"
   end
 
+  # Second LCD line: duration + age, max 16 chars (HD44780 width).
+  # Prefer "ago"; tighten "0d 9h 44m" -> "0d9h44m" when needed to fit.
+  def last_session_detail_line
+    age = ago_dhm
+    candidates = [
+      "#{duration_mmss} #{age} ago",
+      "#{duration_mmss} #{age.delete(" ")} ago",
+      "#{duration_mmss} #{age}",
+      "#{duration_mmss} #{age.delete(" ")}"
+    ]
+    candidates.find { |s| s.length <= 16 } || candidates.first[0, 16]
+  end
+
   class << self
     def latest
       newest_first.first
     end
 
-    # Free-text for therapy UDP reply `message` after A+digit user select.
+    # Two-line therapy UDP `message` for session_timer 16x2 (\n splits lines).
+    #   Last session
+    #   1:30 0d 9h 44m ago
     def last_session_message_for(user)
       return "No prior session" if user.nil?
 
       exp = user.exposures.newest_first.first
       return "No prior session" if exp.nil?
 
-      label = exp.ago_compact
-      label == "just now" ? "Last session just now" : "Last session #{label} ago"
+      "Last session\n#{exp.last_session_detail_line}"
     end
   end
 end

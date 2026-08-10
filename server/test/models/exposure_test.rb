@@ -56,36 +56,52 @@ class ExposureTest < ActiveSupport::TestCase
     assert_difference("Exposure.count", -1) { user.destroy! }
   end
 
-  test "ago_compact formats recent and multi-day ages" do
+  test "ago_dhm always includes days hours minutes" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      e = Exposure.new(user: users(:one), started_at: 30.seconds.ago, duration_seconds: 30)
-      assert_equal "just now", e.ago_compact
+      e = Exposure.new(user: users(:one), started_at: Time.zone.now, duration_seconds: 90)
+      assert_equal "0d 0h 0m", e.ago_dhm
 
-      e.started_at = 45.minutes.ago
-      assert_equal "45m", e.ago_compact
+      e.started_at = Time.zone.parse("2026-08-10 02:16:00")
+      assert_equal "0d 9h 44m", e.ago_dhm
 
-      e.started_at = 22.hours.ago
-      assert_equal "22h", e.ago_compact
-
-      e.started_at = (1.day + 22.hours).ago
-      assert_equal "1d 22h", e.ago_compact
-
-      e.started_at = 3.days.ago
-      assert_equal "3d", e.ago_compact
+      e.started_at = Time.zone.parse("2026-08-08 12:00:00")
+      assert_equal "2d 0h 0m", e.ago_dhm
     end
   end
 
-  test "last_session_message_for uses newest exposure" do
+  test "last_session_detail_line fits 16 columns and keeps ago" do
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      e = Exposure.new(
+        user: users(:one),
+        started_at: Time.zone.parse("2026-08-10 02:16:00"),
+        duration_seconds: 90
+      )
+      line = e.last_session_detail_line
+      assert_operator line.length, :<=, 16
+      assert_match(/1:30/, line)
+      assert_match(/0d.*9h.*44m/, line)
+      assert_match(/ago/, line)
+    end
+  end
+
+  test "last_session_message_for is two LCD lines" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
       user = users(:one)
       user.exposures.destroy_all
       assert_equal "No prior session", Exposure.last_session_message_for(user)
 
-      Exposure.create!(user: user, started_at: 2.days.ago, duration_seconds: 60)
-      assert_equal "Last session 2d ago", Exposure.last_session_message_for(user)
-
-      Exposure.create!(user: user, started_at: 90.minutes.ago, duration_seconds: 45)
-      assert_equal "Last session 1h ago", Exposure.last_session_message_for(user)
+      Exposure.create!(
+        user: user,
+        started_at: Time.zone.parse("2026-08-10 02:16:00"),
+        duration_seconds: 90
+      )
+      msg = Exposure.last_session_message_for(user)
+      lines = msg.split("\n", 2)
+      assert_equal "Last session", lines[0]
+      assert_operator lines[1].length, :<=, 16
+      assert_match(/1:30/, lines[1])
+      assert_match(/ago/, lines[1])
     end
   end
+
 end
