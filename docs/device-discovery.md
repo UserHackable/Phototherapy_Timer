@@ -58,7 +58,7 @@ UTF-8 JSON objects (single datagram, no framing):
 | `users` | users reply | Household ids 1–9, then **`{id:0,name:"Guest"}` last** |
 | `user_id` | therapy / exposure | Key digit **0–9** (0 = Guest) |
 | `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry |
-| `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held briefly) |
+| `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held ~30s) |
 | `duration_seconds` | exposure | Actual lamp-on seconds for this run |
 | `error` | therapy / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"bad_duration"` |
 

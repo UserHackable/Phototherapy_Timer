@@ -123,7 +123,7 @@ typedef enum {
 #define USERS_MODE_MS      30000
 #define USERS_PAGE_MAX     10 /* max pages (one user per page worst case) */
 /** How long to hold a therapy reply message on the LCD before entry UI. */
-#define THERAPY_MSG_HOLD_MS 2500
+#define THERAPY_MSG_HOLD_MS 30000
 /** Buffer for optional therapy "message" (display uses at most 2×16). */
 #define THERAPY_MSG_CAP     64
 
@@ -1333,7 +1333,7 @@ static void apply_therapy_entry(int user_id, const char *name, int sec)
 
 /**
  * If the therapy reply included a non-empty message, show it on the 16x2,
- * hold briefly so it can be read, then restore the entry UI.
+ * hold 30s so it can be read, then restore the entry UI.
  */
 static void show_therapy_message_if_any(const char *message)
 {
