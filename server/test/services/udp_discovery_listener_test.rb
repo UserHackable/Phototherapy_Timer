@@ -138,6 +138,37 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal [ "rob        0:29", "* abort  Running" ], device.last_status["lcd"]
   end
 
+  test "handle_packet ota forwards to the device ip" do
+    user_device = devices(:one)
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_ota_request(identity: user_device.identity),
+      "192.168.50.9"
+    )
+    data = JSON.parse(reply)
+    assert_equal "ota", data["type"]
+    assert_equal true, data["ok"]
+    assert_equal true, data["forwarded"]
+    assert_equal user_device.ip, data["ip"]
+    assert_equal user_device.identity, data["identity"]
+  end
+
+  test "handle_packet ota ack is ignored" do
+    assert_nil @listener.handle_packet(
+      %({"v":1,"type":"ota","ok":true,"identity":"esp-one","version":"f65b788"}),
+      "192.168.1.10"
+    )
+  end
+
+  test "handle_packet ota unknown identity" do
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_ota_request(identity: "no-such-esp"),
+      "192.168.50.9"
+    )
+    data = JSON.parse(reply)
+    assert_equal false, data["ok"]
+    assert_equal "not_found", data["error"]
+  end
+
   test "handle_packet ignores pong" do
     before = Device.count
     assert_nil @listener.handle_packet(

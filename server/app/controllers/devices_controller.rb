@@ -1,5 +1,5 @@
 class DevicesController < ApplicationController
-  before_action :set_device, only: %i[ show edit update destroy ]
+  before_action :set_device, only: %i[ show edit update destroy ota_check ]
 
   # GET /devices or /devices.json
   def index
@@ -45,6 +45,15 @@ class DevicesController < ApplicationController
         format.json { render json: @device.errors, status: :unprocessable_content }
       end
     end
+  end
+
+  # POST /devices/:id/ota_check — poke the module to check LAN firmware now.
+  def ota_check
+    @device.request_ota_check!
+    redirect_back fallback_location: @device,
+                  notice: "Update check sent to #{@device.identity.presence || @device.ip}. Watch the module LCD."
+  rescue ArgumentError, SystemCallError, SocketError => e
+    redirect_back fallback_location: @device, alert: "Could not reach the module: #{e.message}"
   end
 
   # DELETE /devices/1 or /devices/1.json

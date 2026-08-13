@@ -1,7 +1,9 @@
 Rails.application.routes.draw do
   resource :session
   resources :passwords, param: :token
-  resources :devices
+  resources :devices do
+    post :ota_check, on: :member
+  end
 
   resources :users, only: %i[index show] do
     resources :exposures

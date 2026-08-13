@@ -59,7 +59,8 @@ UTF-8 JSON objects (single datagram, no framing):
 | Field | Where | Meaning |
 |-------|--------|---------|
 | `v` | both | Protocol version (**1**) |
-| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapy"`, `"exposure"`, or `"status"` |
+| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapy"`, `"exposure"`, `"status"`, or `"ota"` |
+| `ota` | web → server → module | Immediate firmware check (key **B** does the same on-device) |
 | `identity` | both | Device id (`esp32-` + MAC) or server hostname |
 | `app` | ping / pong | Firmware app name (`session_timer`) |
 | `version` | ping | Running image version (git short SHA from `esp_app_desc`) |

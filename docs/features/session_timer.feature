@@ -306,6 +306,7 @@ Feature: Session timer entry and countdown
       | *     | the entry field is cleared                          |
       | 1     | a new entry begins with digit 1                     |
       | A     | the entry UI is shown without changing sticky time  |
+      | B     | an immediate OTA check is requested                 |
       | C     | last exposure plus step_minutes is programmed       |
       | D     | last exposure minus step_minutes is programmed      |
 
@@ -315,6 +316,21 @@ Feature: Session timer entry and countdown
     Given Wi-Fi credentials are stored in NVS
     When the device boots
     Then it attempts to connect and synchronize wall time
+
+  Scenario: Key B checks for a firmware update now
+    Given the module has discovered the Rails server over UDP
+    And the UI is not in a running session
+    When the user presses "B"
+    Then the LCD shows a checking-for-update message
+    And the module GETs /firmware/session_timer/manifest.json immediately
+    And if the published version differs it installs and reboots
+    And if it matches the LCD shows "Up to date" with the running version
+
+  Scenario: Server can poke the module to check for updates
+    Given the module is listening on UDP 3000
+    When the admin clicks "Check for update" on the device page
+    Then the server sends {"type":"ota"} to the module
+    And the module behaves as if key B was pressed
 
   Scenario: Module reports UI state and display text
     Given the module has discovered the Rails server over UDP

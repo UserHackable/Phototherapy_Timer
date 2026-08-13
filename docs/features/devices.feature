@@ -21,6 +21,7 @@ Feature: Device registry in the web UI
     And I see the firmware version the module last reported
     And when an OTA manifest exists I see whether that version matches published
     And I see the last reported UI state and LCD / LED text when the module has sent status
+    And I can click "Check for update" to poke the module into an OTA check
 
   Scenario: Show a device
     When I visit a device show page

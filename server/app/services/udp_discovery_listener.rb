@@ -17,6 +17,7 @@ require "socket"
 #      "status":{"state":"entry","lcd":["Guest      0:30","* clear  start #"],"led":"00:30"}}
 #     {"v":1,"type":"status","identity":"esp32-<mac>","app":"session_timer",
 #      "status":{"state":"running","user":"rob","lcd":["rob        0:29","* abort  Running"]}}
+#     {"v":1,"type":"ota","identity":"esp32-<mac>"}  # web / key-B poke → module checks now
 #     {"v":1,"type":"users","identity":"esp32-<mac>"}   # user list request (key A)
 #     {"v":1,"type":"therapy","identity":"esp32-<mac>","user_id":4}  # A then digit
 #     {"v":1,"type":"exposure","identity":"esp32-<mac>",
@@ -142,6 +143,8 @@ class UdpDiscoveryListener
       handle_exposure_log(parsed, remote_ip)
     when :status
       handle_status_report(parsed, remote_ip)
+    when :ota
+      handle_ota_request(parsed, remote_ip)
     else
       @logger.debug("[udp_discovery] ignore from #{remote_ip}: #{text.truncate(120)}")
       nil
@@ -210,6 +213,47 @@ class UdpDiscoveryListener
       )
     end
     nil
+  end
+
+  # Web (or another host) asks a module to check OTA now.
+  # Acks from the module (ok:true) are logged only. Requests are forwarded
+  # to the device's last known LAN IP on UDP 3000.
+  def handle_ota_request(parsed, remote_ip)
+    if !parsed[:ok].nil?
+      @logger.info(
+        "[udp_discovery] ota ack from #{remote_ip}" \
+        "#{parsed[:identity] ? " identity=#{parsed[:identity]}" : ""}" \
+        "#{parsed[:version] ? " version=#{parsed[:version]}" : ""}"
+      )
+      return nil
+    end
+
+    identity = parsed[:identity]
+    device =
+      ActiveRecord::Base.connection_pool.with_connection do
+        if identity.present?
+          Device.find_by(identity: identity)
+        else
+          Device.find_by(ip: remote_ip)
+        end
+      end
+    unless device&.ip.present?
+      @logger.warn("[udp_discovery] ota: no device for identity=#{identity.inspect}")
+      return self.class.build_ota_reply(ok: false, error: "not_found", identity: identity)
+    end
+
+    payload = self.class.build_ota_request(identity: device.identity)
+    @logger.info("[udp_discovery] ota forward → #{device.ip}:#{self.class.port} #{payload}")
+    begin
+      UDPSocket.open do |s|
+        s.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, true) if defined?(Socket::SO_REUSEADDR)
+        s.send(payload, 0, device.ip, self.class.port)
+      end
+    rescue StandardError => e
+      @logger.error("[udp_discovery] ota forward error: #{e.class}: #{e.message}")
+      return self.class.build_ota_reply(ok: false, error: "send_failed", identity: device.identity)
+    end
+    self.class.build_ota_reply(ok: true, forwarded: true, identity: device.identity, ip: device.ip)
   end
 
   def handle_users_request(parsed, remote_ip)
@@ -371,6 +415,15 @@ class UdpDiscoveryListener
         status: coerce_status(data["status"]),
         v: data["v"]
       }
+    when "ota"
+      {
+        type: :ota,
+        identity: data["identity"].presence,
+        ip: data["ip"].presence,
+        version: coerce_firmware_version(data["version"]),
+        ok: data.key?("ok") ? data["ok"] : nil,
+        v: data["v"]
+      }
     when "status"
       {
         type: :status,
@@ -498,6 +551,28 @@ class UdpDiscoveryListener
     payload[:version] = version if version.present?
     payload[:app] = app if app.present?
     payload[:status] = status if status.present?
+    payload.to_json
+  end
+
+  def self.build_ota_request(identity:)
+    {
+      v: PROTOCOL_VERSION,
+      type: "ota",
+      identity: identity
+    }.to_json
+  end
+
+  def self.build_ota_reply(ok:, error: nil, forwarded: nil, identity: nil, ip: nil, version: nil)
+    payload = {
+      v: PROTOCOL_VERSION,
+      type: "ota",
+      ok: ok
+    }
+    payload[:error] = error if error.present?
+    payload[:forwarded] = forwarded unless forwarded.nil?
+    payload[:identity] = identity if identity.present?
+    payload[:ip] = ip if ip.present?
+    payload[:version] = version if version.present?
     payload.to_json
   end
 

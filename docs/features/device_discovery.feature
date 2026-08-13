@@ -28,6 +28,12 @@ Feature: LAN device discovery over UDP JSON
     And unix is a current Unix timestamp
     And the module applies tz_posix via setenv TZ before using local time
 
+  Scenario: OTA poke is forwarded to the module
+    Given a Device exists with identity "esp32-b4bfe9e70e64" and a LAN IP
+    When the web app sends {"v":1,"type":"ota","identity":"esp32-b4bfe9e70e64"}
+    Then the UDP listener unicasts type ota to that device IP on port 3000
+    And replies ok true forwarded true
+
   Scenario: Status report stores LCD and LED snapshot
     Given a Device exists with identity "esp32-b4bfe9e70e64"
     When the ESP sends type status with lcd ["rob        0:29","* abort  Running"] and led "00:29"

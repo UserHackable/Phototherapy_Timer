@@ -92,6 +92,7 @@ Full wire format: [docs/device-discovery.md](../docs/device-discovery.md).
 |------|-----------|------|
 | `ping` → `pong` | ESP ↔ server | Device upsert; wall clock **unix** + **tz** / **tz_posix** / **tz_offset**; ping **version** / **app**; optional **status**; pong **published_version** |
 | `status` | ESP → server | UI snapshot (mode, LCD lines, LED, lamp/fan); stored on Device; no reply |
+| `ota` | web → server → ESP | Immediate firmware check (`POST /devices/:id/ota_check` or key **B**) |
 | `users` | ESP ↔ server | Key **A**: household ids 1–9, then **Guest id 0** |
 | `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds` (default **30**), `step_minutes` (default **15**), `last_duration_seconds`; optional `message` → module 16x2 |
 | `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix` |

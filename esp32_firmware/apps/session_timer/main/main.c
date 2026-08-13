@@ -15,6 +15,7 @@
  *   - Therapy reply optional "message" → show on 16x2 LCD, then entry UI
  *   - Therapy reply step_minutes (default 15) + last_duration_seconds
  *   - Key C: last exposure + step_minutes; D: last − step (floor 0, cap 99:59)
+ *   - Key B / UDP type "ota": check for LAN firmware now (idle only)
  *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
  *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
@@ -172,6 +173,9 @@ static int64_t s_last_wifi_try_us;
 static int64_t s_last_discovery_us;
 static int64_t s_last_ota_check_us;
 static bool s_ota_boot_marked;
+/** Set by key B or UDP type "ota"; maybe_ota_check runs on the next idle pass. */
+static volatile bool s_ota_requested;
+static int s_cmd_sock = -1;
 
 static char s_device_identity[40];
 static char s_server_ip[16];
@@ -597,6 +601,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         s_have_ip = false;
         s_have_server = false;
         s_wifi_retry++;
+        if (s_cmd_sock >= 0) {
+            close(s_cmd_sock);
+            s_cmd_sock = -1;
+        }
         ESP_LOGW(TAG, "Wi‑Fi disconnected, retry %d", s_wifi_retry);
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -1896,6 +1904,96 @@ static bool ota_may_start(void)
     return true;
 }
 
+static void request_ota_check(const char *reason)
+{
+    s_ota_requested = true;
+    ESP_LOGI(TAG, "OTA requested (%s) running=%s",
+             reason ? reason : "?", uh_ota_running_version());
+    if (s_state == ST_RUNNING) {
+        lcd_status("Update after", "session");
+        return;
+    }
+    if (s_state == ST_USERS) {
+        s_state = ST_ENTRY;
+        note_input();
+    }
+    lcd_status("Checking for", "update…");
+}
+
+static void cmd_sock_ensure(void)
+{
+    if (s_cmd_sock >= 0 || !s_have_ip) {
+        return;
+    }
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        return;
+    }
+    int one = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(DISCOVERY_PORT);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGW(TAG, "cmd sock bind :%d failed errno %d", DISCOVERY_PORT, errno);
+        close(sock);
+        return;
+    }
+    s_cmd_sock = sock;
+    ESP_LOGI(TAG, "cmd sock listening UDP :%d (type ota)", DISCOVERY_PORT);
+}
+
+static void cmd_sock_poll(void)
+{
+    cmd_sock_ensure();
+    if (s_cmd_sock < 0) {
+        return;
+    }
+    char rx[256];
+    struct sockaddr_in src = {0};
+    socklen_t slen = sizeof(src);
+    int n = recvfrom(s_cmd_sock, rx, sizeof(rx) - 1, MSG_DONTWAIT,
+                     (struct sockaddr *)&src, &slen);
+    if (n < 0) {
+        return;
+    }
+    rx[n] = '\0';
+    cJSON *j = cJSON_Parse(rx);
+    if (!j) {
+        return;
+    }
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
+    bool is_ota = cJSON_IsString(type) && type->valuestring &&
+                  strcasecmp(type->valuestring, "ota") == 0;
+    const cJSON *ok = cJSON_GetObjectItemCaseSensitive(j, "ok");
+    cJSON_Delete(j);
+    if (!is_ota || cJSON_IsTrue(ok) || cJSON_IsFalse(ok)) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "ota cmd from %s", inet_ntoa(src.sin_addr));
+    request_ota_check("udp");
+
+    cJSON *ack = cJSON_CreateObject();
+    if (!ack) {
+        return;
+    }
+    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(ack, "type", "ota");
+    cJSON_AddTrueToObject(ack, "ok");
+    cJSON_AddBoolToObject(ack, "busy", !ota_may_start() && s_state == ST_RUNNING);
+    cJSON_AddStringToObject(ack, "version", uh_ota_running_version());
+    cJSON_AddStringToObject(ack, "identity", s_device_identity);
+    char *payload = cJSON_PrintUnformatted(ack);
+    cJSON_Delete(ack);
+    if (!payload) {
+        return;
+    }
+    sendto(s_cmd_sock, payload, strlen(payload), 0, (struct sockaddr *)&src, slen);
+    free(payload);
+}
+
 /**
  * Poll LAN server for a newer session_timer image (HTTP + SHA-256).
  * Blocks during download; only called when idle. Successful OTA reboots.
@@ -1917,21 +2015,23 @@ static void maybe_ota_check(void)
     }
 
     int64_t now = esp_timer_get_time();
+    bool requested = s_ota_requested;
     if (!s_ota_boot_marked) {
         /* Cancel bootloader rollback, then fall through into the first check. */
-        if (now < (int64_t)OTA_BOOT_DELAY_MS * 1000) {
+        if (!requested && now < (int64_t)OTA_BOOT_DELAY_MS * 1000) {
             return;
         }
         uh_ota_mark_valid();
         s_ota_boot_marked = true;
         ESP_LOGI(TAG, "OTA: app marked valid; version=%s", uh_ota_running_version());
-    } else if ((now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
+    } else if (!requested && (now - s_last_ota_check_us) < (int64_t)OTA_CHECK_PERIOD_MS * 1000) {
         return;
     }
     if (!ota_may_start()) {
         ESP_LOGD(TAG, "OTA: deferred (busy UI/session)");
         return;
     }
+    s_ota_requested = false;
 
     s_last_ota_check_us = now;
 
@@ -1952,12 +2052,24 @@ static void maybe_ota_check(void)
     /* uh_ota reboots on success; these paths are skip / no image / error. */
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "OTA: up to date");
+        if (requested) {
+            lcd_status("Up to date", uh_ota_running_version());
+            vTaskDelay(pdMS_TO_TICKS(1200));
+        }
     } else if (err == ESP_ERR_NOT_FOUND) {
         ESP_LOGI(TAG, "OTA: no manifest/image on server");
+        if (requested) {
+            lcd_status("No update", "on server");
+            vTaskDelay(pdMS_TO_TICKS(1200));
+        }
     } else if (err == ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "OTA: skipped (not safe to update now)");
     } else {
         ESP_LOGW(TAG, "OTA: %s", esp_err_to_name(err));
+        if (requested) {
+            lcd_status("Update fail", esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(1200));
+        }
     }
 
     if (s_state == ST_CLOCK) {
@@ -2138,7 +2250,7 @@ static void on_key(char k)
             return;
         }
         if (k == 'B') {
-            ui_entry_refresh();
+            request_ota_check("key B");
             return;
         }
         /* Fall through for * / # */
@@ -2161,8 +2273,7 @@ static void on_key(char k)
             return;
         }
         if (k == 'B') {
-            s_entry_fresh = (s_entry_digits > 0 || s_entry > 0);
-            ui_entry_refresh();
+            request_ota_check("key B");
             return;
         }
         /* Fall through to process * # digit as entry keys */
@@ -2215,7 +2326,7 @@ static void on_key(char k)
         return;
     }
     if (k == 'B') {
-        ui_entry_refresh();
+        request_ota_check("key B");
         return;
     }
 }
@@ -2410,6 +2521,7 @@ void app_main(void)
         network_maintenance();
         tick_fan_rundown();
         maybe_send_status();
+        cmd_sock_poll();
         maybe_ota_check();
 
         /* Headless bench: periodic status (no keypad/LCD). */

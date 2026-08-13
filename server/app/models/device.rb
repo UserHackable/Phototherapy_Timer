@@ -85,6 +85,19 @@ class Device < ApplicationRecord
   end
 
   # true / false when both sides known; nil if we cannot compare.
+  # Ask the LAN UDP listener to poke this module into an immediate OTA check.
+  def request_ota_check!
+    raise ArgumentError, "identity is required" if identity.blank?
+
+    host = ENV.fetch("UDP_DISCOVERY_IP", "192.168.1.202")
+    port = UdpDiscoveryListener.port
+    payload = UdpDiscoveryListener.build_ota_request(identity: identity)
+    UDPSocket.open do |s|
+      s.send(payload, 0, host, port)
+    end
+    true
+  end
+
   def firmware_matches_published?
     ver = firmware_version.to_s.strip
     return nil if ver.blank?

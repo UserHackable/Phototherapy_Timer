@@ -76,6 +76,18 @@ class DevicesControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to devices_url
   end
 
+  test "ota_check pokes the device and redirects" do
+    post ota_check_device_url(@device)
+    assert_redirected_to device_url(@device)
+    assert_match(/Update check sent/, flash[:notice])
+  end
+
+  test "guest cannot request ota_check" do
+    sign_out
+    post ota_check_device_url(@device)
+    assert_redirected_to new_session_path
+  end
+
   test "guest is redirected to sign in" do
     sign_out
     get devices_url

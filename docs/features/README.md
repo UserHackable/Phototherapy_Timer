@@ -29,6 +29,7 @@ stay aligned.
 | Fan SSR | **GPIO27** — on with lamp, **30 s** after lamp off |
 | Exposure log | UDP on lamp off → `/users/:id/exposures` |
 | Status report | UDP `status` + ping: mode, LCD 2×16, LED, lamp/fan → `/devices` |
+| OTA now | Key **B** or `/devices` **Check for update** (UDP `type:ota`) |
 
 Protocol detail: [device-discovery.md](../device-discovery.md).  
 Wiring: [wiring.md](../wiring.md).  

@@ -1,4 +1,5 @@
 <p style="color: green"><%= notice %></p>
+<p style="color: red"><%= alert %></p>
 
 <% content_for :title, "Devices" %>
 
@@ -9,6 +10,9 @@
     <%= render device %>
     <p>
       <%= link_to "Show this device", device %>
+      <% if device.identity.present? %>
+        · <%= button_to "Check for update", ota_check_device_path(device), method: :post, form: { style: "display: inline" } %>
+      <% end %>
     </p>
   <% end %>
 </div>

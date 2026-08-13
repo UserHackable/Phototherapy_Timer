@@ -1,10 +1,14 @@
 <p style="color: green"><%= notice %></p>
+<p style="color: red"><%= alert %></p>
 
 <%= render @device %>
 
 <div>
   <%= link_to "Edit this device", edit_device_path(@device) %> |
   <%= link_to "Back to devices", devices_path %>
+  <% if @device.identity.present? %>
+    | <%= button_to "Check for update", ota_check_device_path(@device), method: :post, form: { style: "display: inline" } %>
+  <% end %>
 
   <%= button_to "Destroy this device", @device, method: :delete %>
 </div>
