@@ -10,11 +10,15 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_24_082010) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_12_140000) do
   create_table "devices", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "firmware_app"
+    t.string "firmware_version"
     t.string "identity"
     t.string "ip"
+    t.json "last_status"
+    t.datetime "last_status_at"
     t.datetime "updated_at", null: false
     t.index ["identity"], name: "index_devices_on_identity", unique: true
     t.index ["ip"], name: "index_devices_on_ip"

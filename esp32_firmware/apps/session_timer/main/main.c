@@ -9,8 +9,12 @@
  *   - Lamp: SSR GPIO26 + blue LED GPIO2; fan SSR GPIO27 (30 s rundown after lamp off)
  *   - Piezo end beep GPIO25
  *   - Wi‑Fi from NVS; UDP JSON discovery for server ID + wall clock
+ *   - Ping reports app + running git version; logs match vs published OTA
+ *   - UDP status: mode, user, lamp/fan, LCD lines, LED text (on display change + ping)
  *   - Key A: user list; digit: therapy recommendation → loads MMSS entry
  *   - Therapy reply optional "message" → show on 16x2 LCD, then entry UI
+ *   - Therapy reply step_minutes (default 15) + last_duration_seconds
+ *   - Key C: last exposure + step_minutes; D: last − step (floor 0, cap 99:59)
  *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
  *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
@@ -82,6 +86,9 @@ static const char *TAG = "session_timer";
 /** Default programmed session: 30 seconds (MMSS entry 30) until user types. */
 #define DEFAULT_ENTRY_MMSS    30
 #define DEFAULT_ENTRY_DIGITS  2
+/** Default C/D increment when therapy reply omits step_minutes. */
+#define DEFAULT_STEP_MINUTES  15
+#define MAX_SESSION_SEC       (99 * 60 + 59)
 #define IDLE_TO_CLOCK_MS  (60 * 1000)
 #define WIFI_IP_WAIT_MS   20000
 #define WIFI_RETRY_MS     (5 * 60 * 1000)
@@ -99,6 +106,8 @@ static const char *TAG = "session_timer";
 #define DISCOVERY_ATTEMPTS    3
 #define DISCOVERY_PERIOD_MS   (5 * 60 * 1000)
 #define DISCOVERY_BOOT_WAIT_MS 6000
+/** Min gap between standalone status datagrams (ping always carries a snapshot). */
+#define STATUS_MIN_MS         250
 /** How often to poll LAN firmware when idle (not while lamp session). */
 #define OTA_CHECK_PERIOD_MS   (15 * 60 * 1000)
 /** Delay after boot before first OTA check (let discovery settle, mark valid). */
@@ -189,6 +198,19 @@ static int64_t s_users_page_start_us;
 /** Selected household user after A + digit (0 / empty name = Guest). */
 static int s_selected_user_id;
 static char s_selected_user_name[24];
+/** From last therapy reply: C adds step_minutes, D subtracts. */
+static int s_step_minutes = DEFAULT_STEP_MINUTES;
+static int s_last_duration_sec;
+static bool s_have_last_duration;
+
+static bool s_status_dirty;
+static int64_t s_last_status_us;
+static char s_led_cache[8];
+static bool s_led_clock;
+static bool s_lamp_on;
+
+static void mark_status_dirty(void);
+static cJSON *status_object(void);
 
 /* ---------- lamp / fan / piezo ---------- */
 
@@ -211,6 +233,7 @@ static void lamp_init(void)
     gpio_set_level(SSR_GPIO, 0);
     gpio_set_level(FAN_SSR_GPIO, 0);
     s_fan_on = false;
+    s_lamp_on = false;
     s_fan_off_at_us = 0;
 }
 
@@ -222,6 +245,7 @@ static void fan_set(bool on)
     if (on) {
         s_fan_off_at_us = 0; /* cancel pending rundown */
     }
+    mark_status_dirty();
     ESP_LOGI(TAG, "fan %s", on ? "ON" : "OFF");
 }
 
@@ -230,6 +254,8 @@ static void lamp_set(bool on)
     int level = on ? 1 : 0;
     gpio_set_level(SSR_GPIO, level);
     gpio_set_level(LAMP_LED_GPIO, level); /* status LED mirrors lamps only */
+    s_lamp_on = on;
+    mark_status_dirty();
     ESP_LOGI(TAG, "lamp %s", on ? "ON" : "OFF");
 
     if (on) {
@@ -371,11 +397,35 @@ static void note_input(void)
     s_last_input_us = esp_timer_get_time();
 }
 
-static void show_led_mmss(int mm, int ss, bool colon)
+static void show_led_mmss_ex(int mm, int ss, bool colon, bool clock)
 {
+    if (mm < 0) {
+        mm = 0;
+    }
+    if (mm > 99) {
+        mm = 99;
+    }
+    if (ss < 0) {
+        ss = 0;
+    }
+    if (ss > 99) {
+        ss = 99;
+    }
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", mm, ss);
+    if (s_led_clock != clock || strncmp(s_led_cache, buf, sizeof(s_led_cache)) != 0) {
+        s_led_clock = clock;
+        snprintf(s_led_cache, sizeof(s_led_cache), "%s", buf);
+        mark_status_dirty();
+    }
     if (s_tm_ok) {
         tm1637_show_pairs(&s_tm, mm, ss, colon);
     }
+}
+
+static void show_led_mmss(int mm, int ss, bool colon)
+{
+    show_led_mmss_ex(mm, ss, colon, false);
 }
 
 /** Wall clock on TM1637 (12h HH:MM, blinking colon). Falls back to entry MM:SS. */
@@ -385,11 +435,11 @@ static void show_led_wall_clock(void)
     if (wall_time_valid(&t)) {
         int hh = hour_12(t.tm_hour);
         bool colon = (t.tm_sec % 2) == 0;
-        show_led_mmss(hh, t.tm_min, colon);
+        show_led_mmss_ex(hh, t.tm_min, colon, true);
     } else {
         int mm, ss;
         entry_to_mmss(s_entry, &mm, &ss);
-        show_led_mmss(mm, ss > 59 ? 59 : ss, true);
+        show_led_mmss_ex(mm, ss > 59 ? 59 : ss, true, true);
     }
 }
 
@@ -398,9 +448,6 @@ static char s_lcd_cache1[17];
 
 static void lcd_status(const char *line0, const char *line1)
 {
-    if (!s_lcd_ok) {
-        return;
-    }
     const char *l0 = line0 ? line0 : "";
     const char *l1 = line1 ? line1 : "";
     /* Skip full redraw if unchanged (clock mode paints often) */
@@ -409,8 +456,11 @@ static void lcd_status(const char *line0, const char *line1)
     }
     snprintf(s_lcd_cache0, sizeof(s_lcd_cache0), "%.16s", l0);
     snprintf(s_lcd_cache1, sizeof(s_lcd_cache1), "%.16s", l1);
-    lcd1602_print_line(&s_lcd, 0, s_lcd_cache0);
-    lcd1602_print_line(&s_lcd, 1, s_lcd_cache1);
+    if (s_lcd_ok) {
+        lcd1602_print_line(&s_lcd, 0, s_lcd_cache0);
+        lcd1602_print_line(&s_lcd, 1, s_lcd_cache1);
+    }
+    mark_status_dirty();
 }
 
 /**
@@ -820,8 +870,139 @@ static bool parse_json_pong(const char *msg, const char *from_ip)
         apply_unix_time((int64_t)unix_j->valuedouble);
     }
 
+    const cJSON *pub = cJSON_GetObjectItemCaseSensitive(root, "published_version");
+    const char *running = uh_ota_running_version();
+    if (cJSON_IsString(pub) && pub->valuestring && pub->valuestring[0]) {
+        if (strcmp(pub->valuestring, running) == 0) {
+            ESP_LOGI(TAG, "firmware matches published %s", running);
+        } else {
+            ESP_LOGW(TAG, "firmware mismatch: running=%s published=%s",
+                     running, pub->valuestring);
+        }
+    } else {
+        ESP_LOGI(TAG, "firmware running=%s (no published_version in pong)", running);
+    }
+
     cJSON_Delete(root);
     return true;
+}
+
+static void mark_status_dirty(void)
+{
+    s_status_dirty = true;
+}
+
+static const char *ui_state_name(void)
+{
+    switch (s_state) {
+    case ST_RUNNING:
+        return "running";
+    case ST_CLOCK:
+        return "clock";
+    case ST_USERS:
+        return "users";
+    default:
+        return "entry";
+    }
+}
+
+static cJSON *status_object(void)
+{
+    cJSON *st = cJSON_CreateObject();
+    if (!st) {
+        return NULL;
+    }
+    cJSON_AddStringToObject(st, "state", ui_state_name());
+    cJSON_AddNumberToObject(st, "user_id", s_selected_user_id > 0 ? s_selected_user_id : 0);
+    cJSON_AddStringToObject(st, "user", selected_user_label());
+
+    int mm, ss;
+    entry_to_mmss(s_entry, &mm, &ss);
+    int sec_show = ss > 59 ? 59 : ss;
+    char entry[8];
+    snprintf(entry, sizeof(entry), "%d:%02d", mm, sec_show);
+    cJSON_AddStringToObject(st, "entry", entry);
+    cJSON_AddNumberToObject(st, "remain_seconds", s_state == ST_RUNNING ? s_remain_sec : 0);
+    cJSON_AddNumberToObject(st, "planned_seconds", s_session_planned_sec);
+    cJSON_AddBoolToObject(st, "lamp", s_lamp_on);
+    cJSON_AddBoolToObject(st, "fan", s_fan_on);
+    cJSON_AddBoolToObject(st, "after_complete", s_after_complete);
+
+    cJSON *lcd = cJSON_CreateArray();
+    if (lcd) {
+        cJSON_AddItemToArray(lcd, cJSON_CreateString(s_lcd_cache0));
+        cJSON_AddItemToArray(lcd, cJSON_CreateString(s_lcd_cache1));
+        cJSON_AddItemToObject(st, "lcd", lcd);
+    }
+    cJSON_AddStringToObject(st, "led", s_led_cache[0] ? s_led_cache : "");
+    cJSON_AddStringToObject(st, "led_kind", s_led_clock ? "clock" : "timer");
+    return st;
+}
+
+static void send_status_datagram(void)
+{
+    if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
+        return;
+    }
+    if (s_device_identity[0] == '\0') {
+        return;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return;
+    }
+    cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(root, "type", "status");
+    cJSON_AddStringToObject(root, "identity", s_device_identity);
+    cJSON_AddStringToObject(root, "app", "session_timer");
+    cJSON_AddStringToObject(root, "version", uh_ota_running_version());
+    cJSON *st = status_object();
+    if (st) {
+        cJSON_AddItemToObject(root, "status", st);
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!payload) {
+        return;
+    }
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        free(payload);
+        return;
+    }
+    struct sockaddr_in dest = {0};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(DISCOVERY_PORT);
+    if (inet_aton(s_server_ip, &dest.sin_addr) == 0) {
+        close(sock);
+        free(payload);
+        return;
+    }
+    ESP_LOGI(TAG, "status → %s:%d %s", s_server_ip, DISCOVERY_PORT, payload);
+    if (sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+        ESP_LOGW(TAG, "status sendto errno %d", errno);
+    }
+    close(sock);
+    free(payload);
+}
+
+static void maybe_send_status(void)
+{
+    if (!s_status_dirty) {
+        return;
+    }
+    int64_t now = esp_timer_get_time();
+    if (s_last_status_us > 0 && (now - s_last_status_us) < (int64_t)STATUS_MIN_MS * 1000) {
+        return;
+    }
+    if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
+        return;
+    }
+    s_status_dirty = false;
+    s_last_status_us = now;
+    send_status_datagram();
 }
 
 static char *build_json_ping(void)
@@ -833,6 +1014,12 @@ static char *build_json_ping(void)
     cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
     cJSON_AddStringToObject(root, "type", "ping");
     cJSON_AddStringToObject(root, "identity", s_device_identity);
+    cJSON_AddStringToObject(root, "app", "session_timer");
+    cJSON_AddStringToObject(root, "version", uh_ota_running_version());
+    cJSON *st = status_object();
+    if (st) {
+        cJSON_AddItemToObject(root, "status", st);
+    }
     /* Report our STA IP so the server can store it even if NAT rewrites peer. */
     esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t ip_info = {0};
@@ -1107,6 +1294,7 @@ static int find_user_index_by_id(int user_id)
 /**
  * Request recommended exposure for user_id from Rails (UDP therapy).
  * On success sets *out_sec, optional name, and optional message buffers; returns true.
+ * Also stores step_minutes and last_duration_seconds for keys C and D.
  * message_out receives therapy reply "message" when present (may be set on error too).
  */
 static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t name_cap,
@@ -1192,6 +1380,8 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
     const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
     const cJSON *rec = cJSON_GetObjectItemCaseSensitive(j, "recommended_seconds");
+    const cJSON *step = cJSON_GetObjectItemCaseSensitive(j, "step_minutes");
+    const cJSON *last_dur = cJSON_GetObjectItemCaseSensitive(j, "last_duration_seconds");
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
     const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
     if (!cJSON_IsString(type) || strcasecmp(type->valuestring, "therapy") != 0) {
@@ -1212,8 +1402,8 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
         return false;
     }
     int sec = (int)rec->valuedouble;
-    if (sec > 99 * 60 + 59) {
-        sec = 99 * 60 + 59;
+    if (sec > MAX_SESSION_SEC) {
+        sec = MAX_SESSION_SEC;
     }
     if (out_sec) {
         *out_sec = sec;
@@ -1222,6 +1412,28 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
         strncpy(name_out, name->valuestring, name_cap - 1);
         name_out[name_cap - 1] = '\0';
     }
+
+    if (cJSON_IsNumber(step) && step->valuedouble >= 0) {
+        int step_min = (int)step->valuedouble;
+        if (step_min > 99) {
+            step_min = 99;
+        }
+        s_step_minutes = step_min;
+    } else {
+        s_step_minutes = DEFAULT_STEP_MINUTES;
+    }
+    if (cJSON_IsNumber(last_dur) && last_dur->valuedouble >= 0) {
+        int last_sec = (int)last_dur->valuedouble;
+        if (last_sec > MAX_SESSION_SEC) {
+            last_sec = MAX_SESSION_SEC;
+        }
+        s_last_duration_sec = last_sec;
+        s_have_last_duration = true;
+    } else {
+        s_last_duration_sec = 0;
+        s_have_last_duration = false;
+    }
+
     cJSON_Delete(j);
     return true;
 }
@@ -1448,6 +1660,42 @@ static void select_user_by_digit(char digit)
     }
     apply_therapy_entry(user_id, name_buf, sec);
     show_therapy_message_if_any(message_buf);
+}
+
+/** C adds step_minutes to last exposure; D subtracts (floor 0). */
+static void apply_last_step(int sign)
+{
+    int last = s_have_last_duration ? s_last_duration_sec : 0;
+    int step = s_step_minutes;
+    if (step < 0) {
+        step = DEFAULT_STEP_MINUTES;
+    }
+    if (step > 99) {
+        step = 99;
+    }
+    if (sign >= 0) {
+        sign = 1;
+    } else {
+        sign = -1;
+    }
+    int sec = last + (sign * step * 60);
+    if (sec > MAX_SESSION_SEC) {
+        sec = MAX_SESSION_SEC;
+    }
+    if (sec < 0) {
+        sec = 0;
+    }
+    if (sec < 1 && sign > 0) {
+        lcd_status("Need last+step", "no last time");
+        note_input();
+        s_state = ST_ENTRY;
+        ESP_LOGW(TAG, "C ignored: last=%ds step=%d min", last, step);
+        return;
+    }
+    apply_therapy_entry(s_selected_user_id, selected_user_label(), sec);
+    ui_entry_paint_top_keep_bottom();
+    ESP_LOGI(TAG, "%c: last %ds %c %d min → %ds (entry %d)",
+             sign > 0 ? 'C' : 'D', last, sign > 0 ? '+' : '-', step, sec, s_entry);
 }
 
 /**
@@ -1828,6 +2076,10 @@ static void session_complete(void)
     lamp_set(false);
     piezo_beep();
     report_exposure_log(uid, elapsed);
+    if (elapsed >= 1) {
+        s_last_duration_sec = elapsed;
+        s_have_last_duration = true;
+    }
     s_state = ST_ENTRY;
     s_entry_fresh = true;
     s_after_complete = true;
@@ -1843,6 +2095,8 @@ static void abort_to_entry(void)
     lamp_set(false);
     if (elapsed >= 1) {
         report_exposure_log(uid, elapsed);
+        s_last_duration_sec = elapsed;
+        s_have_last_duration = true;
     }
     s_state = ST_ENTRY;
     s_entry_fresh = true;
@@ -1866,7 +2120,15 @@ static void on_key(char k)
         }
         s_state = ST_ENTRY;
         note_input();
-        if (k == 'B' || k == 'C' || k == 'D') {
+        if (k == 'C') {
+            apply_last_step(1);
+            return;
+        }
+        if (k == 'D') {
+            apply_last_step(-1);
+            return;
+        }
+        if (k == 'B') {
             ui_entry_refresh();
             return;
         }
@@ -1881,7 +2143,15 @@ static void on_key(char k)
             do_user_list_key();
             return;
         }
-        if (k == 'B' || k == 'C' || k == 'D') {
+        if (k == 'C') {
+            apply_last_step(1);
+            return;
+        }
+        if (k == 'D') {
+            apply_last_step(-1);
+            return;
+        }
+        if (k == 'B') {
             s_entry_fresh = (s_entry_digits > 0 || s_entry > 0);
             ui_entry_refresh();
             return;
@@ -1927,7 +2197,15 @@ static void on_key(char k)
         do_user_list_key();
         return;
     }
-    if (k == 'B' || k == 'C' || k == 'D') {
+    if (k == 'C') {
+        apply_last_step(1);
+        return;
+    }
+    if (k == 'D') {
+        apply_last_step(-1);
+        return;
+    }
+    if (k == 'B') {
         ui_entry_refresh();
         return;
     }
@@ -2122,6 +2400,7 @@ void app_main(void)
 
         network_maintenance();
         tick_fan_rundown();
+        maybe_send_status();
         maybe_ota_check();
 
         /* Headless bench: periodic status (no keypad/LCD). */

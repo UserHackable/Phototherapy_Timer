@@ -20,12 +20,15 @@ stay aligned.
 | Therapy recommendation | **30 seconds** until per-user schedules exist |
 | User list | Household **1–9**, then **0:Guest** |
 | Select user | **A** then digit **0–9** |
+| Step-up (C) | Last exposure + **15 minutes** (`step_minutes` from therapy reply) |
+| Step-down (D) | Last exposure − **15 minutes** (floors at **0:00**) |
 | LCD entry / run / clock top | Name left, duration right (`Guest` if none) |
 | LCD clock bottom | Calendar date |
 | TM1637 clock mode | Wall clock HH:MM |
 | Lamp SSR | **GPIO26** (+ LED GPIO2) |
 | Fan SSR | **GPIO27** — on with lamp, **30 s** after lamp off |
 | Exposure log | UDP on lamp off → `/users/:id/exposures` |
+| Status report | UDP `status` + ping: mode, LCD 2×16, LED, lamp/fan → `/devices` |
 
 Protocol detail: [device-discovery.md](../device-discovery.md).  
 Wiring: [wiring.md](../wiring.md).  

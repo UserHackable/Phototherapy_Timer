@@ -5,6 +5,7 @@
 # Piezo GPIO25 end beep. Displays: LCD1602 + TM1637.
 # Wi‑Fi + UDP JSON discovery; SNTP fallback.
 # Key A: users list (household + Guest); digit 0–9: therapy → entry.
+# Key C: last exposure + step_minutes; D: last − step (default 15 minutes).
 # Default entry / therapy: 30 seconds. Exposure log on lamp off.
 #
 # Not automated yet — product contract (see docs/features/README.md).
@@ -171,6 +172,38 @@ Feature: Session timer entry and countdown
     And the entry field is programmed to 0 minutes and 30 seconds
     And the LCD top line shows the selected user with the recommended time
 
+  Scenario: Key C programs last exposure plus step minutes
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included last_duration_seconds 90 and step_minutes 15
+    When the user presses "C" in entry mode
+    Then the entry is programmed to last exposure plus 15 minutes (16:30)
+    And the LED display shows "16:30"
+    And the LCD top line shows "rob" with "16:30" on the right
+    And "#" will start that time
+
+  Scenario: Key C with no prior exposure uses only the step
+    Given the user selected Guest via A then 0
+    And the therapy reply included last_duration_seconds 0 and step_minutes 15
+    When the user presses "C"
+    Then the entry is programmed to 15 minutes and 0 seconds
+    And the LED display shows "15:00"
+
+  Scenario: Key D programs last exposure minus step minutes
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included last_duration_seconds 990 and step_minutes 15
+    When the user presses "D" in entry mode
+    Then the entry is programmed to last exposure minus 15 minutes (1:30)
+    And the LED display shows "01:30"
+    And the LCD top line shows "rob" with "1:30" on the right
+
+  Scenario: Key D floors at zero when last is shorter than the step
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included last_duration_seconds 90 and step_minutes 15
+    When the user presses "D"
+    Then the entry is programmed to 0 minutes and 0 seconds
+    And the LED display shows "00:00"
+    And "#" will not start until a positive time is set
+
   Scenario: Digit for unknown user id does not load exposure
     Given the UI is paging the household user list
     And no listed user has id 9
@@ -273,6 +306,8 @@ Feature: Session timer entry and countdown
       | *     | the entry field is cleared                          |
       | 1     | a new entry begins with digit 1                     |
       | A     | the entry UI is shown without changing sticky time  |
+      | C     | last exposure plus step_minutes is programmed       |
+      | D     | last exposure minus step_minutes is programmed      |
 
   # --- Network -------------------------------------------------------------
 
@@ -280,6 +315,14 @@ Feature: Session timer entry and countdown
     Given Wi-Fi credentials are stored in NVS
     When the device boots
     Then it attempts to connect and synchronize wall time
+
+  Scenario: Module reports UI state and display text
+    Given the module has discovered the Rails server over UDP
+    When the LCD or LED content changes, or a discovery ping is sent
+    Then the module sends JSON type "status" (or a ping with nested status)
+    And the payload includes state, selected user, lcd two-line text, and led text
+    And the server stores that snapshot on the Device
+    And the module does not wait for a status reply
 
   Scenario: Offline falls back to timer-only
     Given network is unavailable

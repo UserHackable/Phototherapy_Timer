@@ -1,5 +1,6 @@
 require "test_helper"
 require "json"
+require "fileutils"
 
 class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   setup do
@@ -8,10 +9,12 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
 
   test "parse_message json ping" do
     parsed = UdpDiscoveryListener.parse_message(
-      %({"v":1,"type":"ping","identity":"esp-mac"})
+      %({"v":1,"type":"ping","identity":"esp-mac","app":"session_timer","version":"99eab52"})
     )
     assert_equal :ping, parsed[:type]
     assert_equal "esp-mac", parsed[:identity]
+    assert_equal "session_timer", parsed[:app]
+    assert_equal "99eab52", parsed[:version]
   end
 
   test "parse_message json pong with time" do
@@ -56,6 +59,85 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal "192.168.50.20", device.ip
   end
 
+  test "handle_packet ping stores firmware version and echoes published_version" do
+    app_dir = Rails.root.join("storage", "firmware", "session_timer")
+    FileUtils.mkdir_p(app_dir)
+    manifest = app_dir.join("manifest.json")
+    begin
+      manifest.write({ "v" => 1, "app" => "session_timer", "version" => "cafebabe" }.to_json)
+
+      pong = @listener.handle_packet(
+        UdpDiscoveryListener.build_ping(
+          identity: "esp-fw-ping",
+          version: "99eab52",
+          app: "session_timer"
+        ),
+        "192.168.50.21"
+      )
+      data = JSON.parse(pong)
+      assert_equal "pong", data["type"]
+      assert_equal "session_timer", data["app"]
+      assert_equal "cafebabe", data["published_version"]
+
+      device = Device.find_by!(identity: "esp-fw-ping")
+      assert_equal "99eab52", device.firmware_version
+      assert_equal "session_timer", device.firmware_app
+    ensure
+      manifest.delete if manifest.exist?
+    end
+  end
+
+  test "handle_packet ping stores nested status" do
+    pong = @listener.handle_packet(
+      UdpDiscoveryListener.build_ping(
+        identity: "esp-status-ping",
+        app: "session_timer",
+        version: "abc1234",
+        status: {
+          "state" => "clock",
+          "user" => "Guest",
+          "lcd" => [ "Guest      0:30", "2026-08-12 WedP" ],
+          "led" => "07:15",
+          "led_kind" => "clock"
+        }
+      ),
+      "192.168.50.22"
+    )
+    assert pong.present?
+    device = Device.find_by!(identity: "esp-status-ping")
+    assert_equal "clock", device.last_status["state"]
+    assert_equal "Guest", device.last_status["user"]
+    assert_equal "07:15", device.last_status["led"]
+    assert_equal "clock", device.last_status["led_kind"]
+  end
+
+  test "handle_packet status report stores display snapshot and sends no reply" do
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_status_report(
+        identity: "esp-status-push",
+        app: "session_timer",
+        status: {
+          "state" => "running",
+          "user" => "rob",
+          "entry" => "0:45",
+          "remain_seconds" => 29,
+          "lamp" => true,
+          "fan" => true,
+          "lcd" => [ "rob        0:29", "* abort  Running" ],
+          "led" => "00:29",
+          "led_kind" => "timer"
+        }
+      ),
+      "192.168.50.23"
+    )
+    assert_nil reply
+    device = Device.find_by!(identity: "esp-status-push")
+    assert_equal "192.168.50.23", device.ip
+    assert_equal "running", device.last_status["state"]
+    assert_equal true, device.last_status["lamp"]
+    assert_equal [ "rob        0:29", "* abort  Running" ], device.last_status["lcd"]
+  end
+
   test "handle_packet ignores pong" do
     before = Device.count
     assert_nil @listener.handle_packet(
@@ -66,10 +148,12 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   end
 
   test "build_ping format" do
-    msg = JSON.parse(UdpDiscoveryListener.build_ping(identity: "esp-x"))
+    msg = JSON.parse(UdpDiscoveryListener.build_ping(identity: "esp-x", version: "deadbee", app: "session_timer"))
     assert_equal "ping", msg["type"]
     assert_equal "esp-x", msg["identity"]
     assert_equal 1, msg["v"]
+    assert_equal "deadbee", msg["version"]
+    assert_equal "session_timer", msg["app"]
   end
 
   test "handle_packet users request returns id and name for seeded users" do
@@ -117,6 +201,10 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal user.name, data["name"]
     assert data["recommended_seconds"].is_a?(Integer)
     assert data["recommended_seconds"] >= 0
+    assert_equal UdpDiscoveryListener::DEFAULT_STEP_MINUTES, data["step_minutes"]
+    assert_equal 15, data["step_minutes"]
+    assert data["last_duration_seconds"].is_a?(Integer)
+    assert data["last_duration_seconds"] >= 0
     assert_not data.key?("error")
     assert data["message"].present?
     assert_match(/Last session|No prior session/, data["message"])
@@ -147,6 +235,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       assert_match(/ago/, lines[1])
       assert_operator lines[1].length, :<=, 16
       assert_equal 0, data["recommended_seconds"]
+      assert_equal 15, data["step_minutes"]
+      assert_equal 90, data["last_duration_seconds"]
     end
   end
 
@@ -175,6 +265,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       )
       data = JSON.parse(reply)
       assert_equal 105, data["recommended_seconds"]
+      assert_equal 15, data["step_minutes"]
+      assert_equal 105, data["last_duration_seconds"]
     end
   end
 
@@ -187,6 +279,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     )
     data = JSON.parse(reply)
     assert_equal "No prior session", data["message"]
+    assert_equal 15, data["step_minutes"]
+    assert_equal 0, data["last_duration_seconds"]
   end
 
   test "build_therapy_reply includes optional message for module LCD" do
@@ -194,6 +288,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       user_id: 4,
       name: "miriam",
       recommended_seconds: 30,
+      step_minutes: 15,
+      last_duration_seconds: 90,
       message: "Last session 2d ago"
     )
     data = JSON.parse(json)
@@ -201,6 +297,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 4, data["user_id"]
     assert_equal "miriam", data["name"]
     assert_equal 30, data["recommended_seconds"]
+    assert_equal 15, data["step_minutes"]
+    assert_equal 90, data["last_duration_seconds"]
     assert_equal "Last session 2d ago", data["message"]
   end
 
@@ -214,6 +312,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 999_999, data["user_id"]
     assert_equal "not_found", data["error"]
     assert_not data.key?("recommended_seconds")
+    assert_not data.key?("step_minutes")
+    assert_not data.key?("last_duration_seconds")
   end
 
   test "handle_packet therapy bad_user_id for negative" do
@@ -236,6 +336,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 0, data["user_id"]
     assert_equal "Guest", data["name"]
     assert_equal 30, data["recommended_seconds"]
+    assert_equal 15, data["step_minutes"]
+    assert data["last_duration_seconds"].is_a?(Integer)
     assert_not data.key?("error")
   end
 

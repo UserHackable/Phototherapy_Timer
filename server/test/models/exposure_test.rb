@@ -107,6 +107,19 @@ class ExposureTest < ActiveSupport::TestCase
     end
   end
 
+  test "last_duration_seconds_for returns newest exposure duration" do
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      user = users(:one)
+      Exposure.where(user_id: user.id).delete_all
+      assert_nil Exposure.last_duration_seconds_for(user)
+      assert_nil Exposure.last_duration_seconds_for(nil)
+
+      Exposure.create!(user: user, started_at: 2.days.ago, duration_seconds: 60)
+      Exposure.create!(user: user, started_at: 10.hours.ago, duration_seconds: 105)
+      assert_equal 105, Exposure.last_duration_seconds_for(user)
+    end
+  end
+
   test "last_session_message_for is two LCD lines" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
       user = users(:one)

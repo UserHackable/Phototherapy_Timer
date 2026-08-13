@@ -79,6 +79,12 @@ class Exposure < ApplicationRecord
       "Last session\n#{exp.last_session_detail_line}"
     end
 
+    def last_duration_seconds_for(user)
+      return nil if user.nil?
+
+      where(user_id: user.id).newest_first.first&.duration_seconds
+    end
+
     def recommended_seconds_for(user, default_seconds: 30)
       return default_seconds if user.nil?
 

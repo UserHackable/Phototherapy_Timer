@@ -20,11 +20,25 @@ Feature: LAN device discovery over UDP JSON
 
   Scenario: Ping upserts device and returns pong with wall time
     Given an ESP32 with identity "esp32-b4bfe9e70e64"
-    When it sends JSON {"v":1,"type":"ping","identity":"esp32-b4bfe9e70e64"} from IP 192.168.1.50
+    When it sends JSON {"v":1,"type":"ping","identity":"esp32-b4bfe9e70e64","app":"session_timer","version":"99eab52"} from IP 192.168.1.50
     Then a Device is created or updated with that identity and IP
+    And the Device stores firmware_version "99eab52" and firmware_app "session_timer"
     And the server unicasts a JSON pong with identity, ip, unix, iso8601, tz, tz_offset, and tz_posix
+    And the pong includes published_version from the OTA manifest when one exists
     And unix is a current Unix timestamp
     And the module applies tz_posix via setenv TZ before using local time
+
+  Scenario: Status report stores LCD and LED snapshot
+    Given a Device exists with identity "esp32-b4bfe9e70e64"
+    When the ESP sends type status with lcd ["rob        0:29","* abort  Running"] and led "00:29"
+    Then that Device last_status includes those display lines
+    And last_status state is "running"
+    And the server does not send a reply
+
+  Scenario: Ping may include a nested status snapshot
+    When a ping includes status state "clock" and lcd lines
+    Then the Device last_status is updated
+    And a pong is still sent
 
   Scenario: Same identity with new IP updates one device row
     Given a Device exists with identity "esp-abc" and ip "10.0.0.5"
@@ -63,6 +77,8 @@ Feature: LAN device discovery over UDP JSON
     And user_id is 4
     And name matches that user
     And recommended_seconds is 30 by default
+    And step_minutes is 15
+    And last_duration_seconds is that user's newest exposure duration, or 0
     And the sending device is upserted like a ping
 
   Scenario: Therapy request for unknown user returns not_found
@@ -85,6 +101,8 @@ Feature: LAN device discovery over UDP JSON
   Scenario: Therapy for Guest id 0 returns recommended exposure
     When the ESP sends therapy with user_id 0
     Then recommended_seconds is 30
+    And step_minutes is 15
+    And last_duration_seconds is Guest's newest exposure duration, or 0
     And name is Guest
 
   # --- Time preference (device side; contract with session_timer) ----------

@@ -11,6 +11,35 @@ class DevicesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "index shows firmware version" do
+    @device.update!(firmware_version: "99eab52", firmware_app: "session_timer")
+    get devices_url
+    assert_response :success
+    assert_match "99eab52", @response.body
+    assert_match "session_timer", @response.body
+  end
+
+  test "index shows last LCD snapshot" do
+    @device.update!(
+      last_status: {
+        "state" => "entry",
+        "user" => "rob",
+        "lcd" => [ "rob        1:30", "* clear  start #" ],
+        "led" => "01:30",
+        "led_kind" => "timer",
+        "lamp" => false,
+        "fan" => false
+      },
+      last_status_at: Time.current
+    )
+    get devices_url
+    assert_response :success
+    assert_match "rob        1:30", @response.body
+    assert_match "* clear  start #", @response.body
+    assert_match "01:30", @response.body
+    assert_match "entry", @response.body
+  end
+
   test "should get new" do
     get new_device_url
     assert_response :success

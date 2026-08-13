@@ -18,6 +18,9 @@ Feature: Device registry in the web UI
     Given one or more Devices exist
     When I visit "/devices"
     Then I see each device with its IP and identity
+    And I see the firmware version the module last reported
+    And when an OTA manifest exists I see whether that version matches published
+    And I see the last reported UI state and LCD / LED text when the module has sent status
 
   Scenario: Show a device
     When I visit a device show page

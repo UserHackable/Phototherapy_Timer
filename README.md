@@ -181,10 +181,12 @@ Working LAN stack and session UI (early product, not medical dosing):
 |------|------------------|
 | **session_timer** | MMSS entry (default **00:30**), `#` start / `*` clear or abort, idle clock |
 | **Displays** | LCD: user + time top, date bottom in clock mode; TM1637: wall clock or countdown |
-| **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (default **30 s**) |
+| **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (default **30 s**); **C** / **D** = last ± **15 min** |
 | **Lamp / fan** | Lamps **GPIO26** + LED **GPIO2**; fan **GPIO27** on with lamps, **30 s** rundown after off |
 | **Exposure log** | Lamp-off UDP → Rails `Exposure` under `/users/:id/exposures` |
 | **LAN OTA** | Dual-OTA partitions; idle poll + SHA-256; publish via `./scripts/fw idf ota-publish` |
+| **Firmware version** | Module ping reports git SHA; `/devices` shows it vs published OTA manifest |
+| **Module status** | UDP `status` + ping snapshot: mode, LCD 2×16, LED, lamp/fan — shown on `/devices` |
 | **Rails** | Auth, devices, users, exposures, firmware files; UDP ping/pong/users/therapy/exposure |
 
 ## Remotes

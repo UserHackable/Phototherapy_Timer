@@ -9,4 +9,58 @@
     <%= device.ip %>
   </div>
 
+  <div>
+    <strong>Firmware:</strong>
+    <% if device.firmware_version.present? %>
+      <%= device.firmware_version %>
+      <% if device.firmware_app.present? %>
+        (<%= device.firmware_app %>)
+      <% end %>
+      <% match = device.firmware_matches_published? %>
+      <% if match == true %>
+        — matches published
+      <% elsif match == false %>
+        — published <%= Device.published_ota_version(device.firmware_app.presence || Device::DEFAULT_FIRMWARE_APP) %>
+      <% end %>
+    <% else %>
+      —
+    <% end %>
+  </div>
+
+  <% status = device.last_status %>
+  <div>
+    <strong>State:</strong>
+    <% if status.present? %>
+      <%= status["state"].presence || "—" %>
+      <% if status["user"].present? %>
+        — <%= status["user"] %>
+      <% end %>
+      <% if status["entry"].present? %>
+        entry <%= status["entry"] %>
+      <% end %>
+      <% if status["state"] == "running" && status["remain_seconds"] %>
+        remain <%= status["remain_seconds"] %>s
+      <% end %>
+      lamp <%= status["lamp"] ? "on" : "off" %>
+      fan <%= status["fan"] ? "on" : "off" %>
+    <% else %>
+      —
+    <% end %>
+  </div>
+
+  <div>
+    <strong>Display:</strong>
+    <% if status.present? && (status["lcd"].present? || status["led"].present?) %>
+      <pre style="margin: 0.25rem 0; font-family: ui-monospace, monospace;"><%= Array(status["lcd"]).map { |line| line.to_s.ljust(16) }.join("\n") %></pre>
+      <% if status["led"].present? %>
+        LED <%= status["led"] %><% if status["led_kind"].present? %> (<%= status["led_kind"] %>)<% end %>
+      <% end %>
+      <% if device.last_status_at %>
+        <div>Reported <%= time_ago_in_words(device.last_status_at) %> ago</div>
+      <% end %>
+    <% else %>
+      —
+    <% end %>
+  </div>
+
 </div>

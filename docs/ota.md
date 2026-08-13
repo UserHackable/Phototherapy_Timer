@@ -14,7 +14,7 @@ the inactive slot).
 | Apps | `session_timer` (product), `ota_smoke` (bench), `wifi_connect` (same table) |
 | Poll | First check ~20 s after boot (after mark-valid); then every ~15 min when idle |
 | Gates | No OTA during a lamp session or A-key user-list paging |
-| Version | Build stamps `esp_app_desc.version` with git short SHA (`PROJECT_VER`); `ota-publish` copies that into `manifest.json` |
+| Version | Build stamps `esp_app_desc.version` with git short SHA (`PROJECT_VER`); `ota-publish` copies that into `manifest.json`. Module ping reports `version`; `/devices` compares it to published |
 | Host | Discovered Rails IP or NVS `discovery/server_ip` |
 
 ## Why

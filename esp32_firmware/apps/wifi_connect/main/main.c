@@ -13,7 +13,8 @@
  * Never logs the password. SSR / lamp path unused.
  *
  * Wire protocol (JSON v1 — server/app/services/udp_discovery_listener.rb):
- *   ESP → :3000  {"v":1,"type":"ping","identity":"esp32-<mac>"}
+ *   ESP → :3000  {"v":1,"type":"ping","identity":"esp32-<mac>",
+ *                 "app":"wifi_connect","version":"<git>"}
  *   Server →     {"v":1,"type":"pong","identity":"<host>","ip":"<ip>",
  *                 "unix":1710000000,"iso8601":"..."}
  *
@@ -27,6 +28,7 @@
 #include <time.h>
 
 #include "cJSON.h"
+#include "esp_app_desc.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -383,6 +385,11 @@ static char *build_json_ping(void)
     cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
     cJSON_AddStringToObject(root, "type", "ping");
     cJSON_AddStringToObject(root, "identity", s_device_identity);
+    cJSON_AddStringToObject(root, "app", "wifi_connect");
+    const esp_app_desc_t *desc = esp_app_get_description();
+    if (desc && desc->version[0]) {
+        cJSON_AddStringToObject(root, "version", desc->version);
+    }
     char *out = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     return out;

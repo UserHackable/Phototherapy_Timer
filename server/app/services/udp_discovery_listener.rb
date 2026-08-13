@@ -12,7 +12,11 @@ require "socket"
 #
 # Wire protocol (UTF-8 JSON, v1):
 #   Client → server:
-#     {"v":1,"type":"ping","identity":"esp32-<mac>"}
+#     {"v":1,"type":"ping","identity":"esp32-<mac>",
+#      "app":"session_timer","version":"99eab52",
+#      "status":{"state":"entry","lcd":["Guest      0:30","* clear  start #"],"led":"00:30"}}
+#     {"v":1,"type":"status","identity":"esp32-<mac>","app":"session_timer",
+#      "status":{"state":"running","user":"rob","lcd":["rob        0:29","* abort  Running"]}}
 #     {"v":1,"type":"users","identity":"esp32-<mac>"}   # user list request (key A)
 #     {"v":1,"type":"therapy","identity":"esp32-<mac>","user_id":4}  # A then digit
 #     {"v":1,"type":"exposure","identity":"esp32-<mac>",
@@ -20,14 +24,17 @@ require "socket"
 #   Server → client:
 #     {"v":1,"type":"pong","identity":"<host>","ip":"<lan-ip>",
 #      "unix":1710000000,"iso8601":"…","tz":"America/Denver",
-#      "tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0"}
+#      "tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0",
+#      "published_version":"99eab52"}  # OTA manifest version when known
 #     {"v":1,"type":"users","users":[{"id":1,"name":"rob"}, ...]}  # ids 1–9 (not Guest)
-#     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":30}
+#     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":30,
+#      "step_minutes":15,"last_duration_seconds":90}
 #     # optional: "message":"shown on module 16x2 LCD after A+digit"
 #     {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":30}
 #
 # recommended_seconds defaults to DEFAULT_RECOMMENDED_SECONDS until per-user
-# therapy schedules exist.
+# therapy schedules exist. step_minutes defaults to DEFAULT_STEP_MINUTES
+# (module C adds step_minutes; D subtracts).
 #
 # ENV:
 #   UDP_DISCOVERY_PORT     (default 3000)
@@ -41,6 +48,8 @@ class UdpDiscoveryListener
   MAX_PACKET = 1500
   # Temporary default until per-user recommended exposure is stored (30 seconds).
   DEFAULT_RECOMMENDED_SECONDS = 30
+  # Increment applied by module keys C (+) and D (−).
+  DEFAULT_STEP_MINUTES = 15
   # POSIX TZ for ESP setenv; override with UDP_DISCOVERY_TZ_POSIX if needed.
   DEFAULT_TZ_POSIX = "MST7MDT,M3.2.0,M11.1.0"
 
@@ -131,6 +140,8 @@ class UdpDiscoveryListener
       handle_therapy_request(parsed, remote_ip)
     when :exposure
       handle_exposure_log(parsed, remote_ip)
+    when :status
+      handle_status_report(parsed, remote_ip)
     else
       @logger.debug("[udp_discovery] ignore from #{remote_ip}: #{text.truncate(120)}")
       nil
@@ -144,22 +155,61 @@ class UdpDiscoveryListener
     identity = parsed[:identity]
     # Prefer client-reported STA IP when present (survives Docker NAT); reply still uses peer.
     device_ip = parsed[:ip].presence || remote_ip
+    firmware_version = parsed[:version]
+    firmware_app = parsed[:app]
     @logger.info(
       "[udp_discovery] ping from #{remote_ip}" \
       "#{identity ? " identity=#{identity}" : ""}" \
-      "#{parsed[:ip].present? ? " client_ip=#{parsed[:ip]}" : ""}"
+      "#{parsed[:ip].present? ? " client_ip=#{parsed[:ip]}" : ""}" \
+      "#{firmware_app ? " app=#{firmware_app}" : ""}" \
+      "#{firmware_version ? " version=#{firmware_version}" : ""}"
     )
 
     ActiveRecord::Base.connection_pool.with_connection do
-      device = Device.upsert_from_discovery!(ip: device_ip, identity: identity)
+      device = Device.upsert_from_discovery!(
+        ip: device_ip,
+        identity: identity,
+        firmware_version: firmware_version,
+        firmware_app: firmware_app,
+        status: parsed[:status]
+      )
       @logger.info(
         "[udp_discovery] Device##{device.id} ip=#{device.ip}" \
-        "#{device.identity.present? ? " identity=#{device.identity}" : ""}"
+        "#{device.identity.present? ? " identity=#{device.identity}" : ""}" \
+        "#{device.firmware_version.present? ? " fw=#{device.firmware_version}" : ""}"
       )
     end
 
     server_ip = self.class.local_ip_for(remote_ip)
-    self.class.build_pong(identity: self.class.server_identity, ip: server_ip)
+    self.class.build_pong(
+      identity: self.class.server_identity,
+      ip: server_ip,
+      app: firmware_app,
+      published_version: Device.published_ota_version(firmware_app.presence || Device::DEFAULT_FIRMWARE_APP)
+    )
+  end
+
+  # Module UI snapshot (fire-and-forget; no reply).
+  def handle_status_report(parsed, remote_ip)
+    identity = parsed[:identity]
+    device_ip = parsed[:ip].presence || remote_ip
+    status = parsed[:status]
+    @logger.info(
+      "[udp_discovery] status from #{remote_ip}" \
+      "#{identity ? " identity=#{identity}" : ""}" \
+      "#{status.is_a?(Hash) ? " state=#{status["state"]}" : ""}"
+    )
+
+    ActiveRecord::Base.connection_pool.with_connection do
+      Device.upsert_from_discovery!(
+        ip: device_ip,
+        identity: identity,
+        firmware_version: parsed[:version],
+        firmware_app: parsed[:app],
+        status: status
+      )
+    end
+    nil
   end
 
   def handle_users_request(parsed, remote_ip)
@@ -219,6 +269,8 @@ class UdpDiscoveryListener
               user,
               default_seconds: DEFAULT_RECOMMENDED_SECONDS
             ),
+            step_minutes: DEFAULT_STEP_MINUTES,
+            last_duration_seconds: Exposure.last_duration_seconds_for(user) || 0,
             message: Exposure.last_session_message_for(user)
           }
         else
@@ -310,7 +362,25 @@ class UdpDiscoveryListener
     type = data["type"].to_s.downcase
     case type
     when "ping"
-      { type: :ping, identity: data["identity"].presence, ip: data["ip"].presence, v: data["v"] }
+      {
+        type: :ping,
+        identity: data["identity"].presence,
+        ip: data["ip"].presence,
+        version: coerce_firmware_version(data["version"]),
+        app: coerce_firmware_app(data["app"]),
+        status: coerce_status(data["status"]),
+        v: data["v"]
+      }
+    when "status"
+      {
+        type: :status,
+        identity: data["identity"].presence,
+        ip: data["ip"].presence,
+        version: coerce_firmware_version(data["version"]),
+        app: coerce_firmware_app(data["app"]),
+        status: coerce_status(data["status"]),
+        v: data["v"]
+      }
     when "users"
       { type: :users, identity: data["identity"].presence, v: data["v"] }
     when "therapy"
@@ -348,6 +418,24 @@ class UdpDiscoveryListener
     nil
   end
 
+  def self.coerce_status(raw)
+    Device.sanitize_status(raw)
+  end
+
+  def self.coerce_firmware_version(raw)
+    s = raw.to_s.strip
+    return nil if s.blank? || s.length > 32
+
+    s
+  end
+
+  def self.coerce_firmware_app(raw)
+    s = raw.to_s.strip
+    return nil unless s.match?(Device::FIRMWARE_APP_NAME)
+
+    s
+  end
+
   def self.coerce_user_id(raw)
     return raw if raw.is_a?(Integer)
     return raw.to_i if raw.is_a?(String) && raw.match?(/\A\d+\z/)
@@ -383,8 +471,8 @@ class UdpDiscoveryListener
     end
   end
 
-  def self.build_pong(identity:, ip:, time: Time.current)
-    {
+  def self.build_pong(identity:, ip:, time: Time.current, app: nil, published_version: nil)
+    payload = {
       v: PROTOCOL_VERSION,
       type: "pong",
       identity: identity,
@@ -394,15 +482,35 @@ class UdpDiscoveryListener
       tz: Time.zone.tzinfo.name,
       tz_offset: time.utc_offset,
       tz_posix: ENV.fetch("UDP_DISCOVERY_TZ_POSIX", DEFAULT_TZ_POSIX)
-    }.to_json
+    }
+    payload[:app] = app if app.present?
+    payload[:published_version] = published_version if published_version.present?
+    payload.to_json
   end
 
-  def self.build_ping(identity:)
-    {
+  def self.build_ping(identity:, ip: nil, version: nil, app: nil, status: nil)
+    payload = {
       v: PROTOCOL_VERSION,
       type: "ping",
       identity: identity
-    }.to_json
+    }
+    payload[:ip] = ip if ip.present?
+    payload[:version] = version if version.present?
+    payload[:app] = app if app.present?
+    payload[:status] = status if status.present?
+    payload.to_json
+  end
+
+  def self.build_status_report(identity:, status:, app: nil, version: nil)
+    payload = {
+      v: PROTOCOL_VERSION,
+      type: "status",
+      identity: identity,
+      status: status
+    }
+    payload[:app] = app if app.present?
+    payload[:version] = version if version.present?
+    payload.to_json
   end
 
   def self.build_users_request(identity:)
@@ -430,7 +538,8 @@ class UdpDiscoveryListener
     }.to_json
   end
 
-  def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil, message: nil)
+  def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil, message: nil,
+                               step_minutes: nil, last_duration_seconds: nil)
     payload = {
       v: PROTOCOL_VERSION,
       type: "therapy",
@@ -438,6 +547,8 @@ class UdpDiscoveryListener
     }
     payload[:name] = name if name.present?
     payload[:recommended_seconds] = recommended_seconds unless recommended_seconds.nil?
+    payload[:step_minutes] = step_minutes unless step_minutes.nil?
+    payload[:last_duration_seconds] = last_duration_seconds unless last_duration_seconds.nil?
     payload[:error] = error if error.present?
     # Free-text note for the module 16x2 (session_timer shows then returns to entry).
     payload[:message] = message if message.present?

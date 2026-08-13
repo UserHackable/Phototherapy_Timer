@@ -15,12 +15,22 @@ UTF-8 JSON objects (single datagram, no framing):
 
 ```json
 // ESP → server (unicast to known host and/or broadcast)
-{"v":1,"type":"ping","identity":"esp32-b4bfe9e70e64"}
+{"v":1,"type":"ping","identity":"esp32-b4bfe9e70e64",
+ "app":"session_timer","version":"99eab52",
+ "status":{"state":"entry","user":"Guest","lcd":["Guest      0:30","* clear  start #"],
+           "led":"00:30","led_kind":"timer","lamp":false,"fan":false}}
+
+// ESP → server when LCD/LED/mode changes (no reply expected)
+{"v":1,"type":"status","identity":"esp32-b4bfe9e70e64","app":"session_timer","version":"99eab52",
+ "status":{"state":"running","user":"rob","entry":"0:45","remain_seconds":29,
+           "lcd":["rob        0:29","* abort  Running"],"led":"00:29","led_kind":"timer",
+           "lamp":true,"fan":true}}
 
 // Server → ESP (unicast to sender)
 {"v":1,"type":"pong","identity":"dreamquest","ip":"192.168.1.163",
  "unix":1721830496,"iso8601":"2026-07-24T12:34:56-06:00",
- "tz":"America/Denver","tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0"}
+ "tz":"America/Denver","tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0",
+ "published_version":"99eab52"}
 
 // ESP → server (key A on session_timer): request user list
 {"v":1,"type":"users","identity":"esp32-b4bfe9e70e64"}
@@ -34,7 +44,9 @@ UTF-8 JSON objects (single datagram, no framing):
 // Server → ESP (default recommended_seconds is 30 until per-user schedules exist)
 // Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
 // Server fills message from that user's newest Exposure (e.g. "Last session 1d 22h ago").
+// step_minutes (default 15) + last_duration_seconds: C = last + step, D = last − step.
 {"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30,
+ "step_minutes":15,"last_duration_seconds":90,
  "message":"Last session\n1:30 0d9h44m ago"}
 
 // ESP → server when the lamp turns off (complete or abort with ≥1 s on)
@@ -47,8 +59,12 @@ UTF-8 JSON objects (single datagram, no framing):
 | Field | Where | Meaning |
 |-------|--------|---------|
 | `v` | both | Protocol version (**1**) |
-| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapy"`, or `"exposure"` |
+| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapy"`, `"exposure"`, or `"status"` |
 | `identity` | both | Device id (`esp32-` + MAC) or server hostname |
+| `app` | ping / pong | Firmware app name (`session_timer`) |
+| `version` | ping | Running image version (git short SHA from `esp_app_desc`) |
+| `published_version` | pong | OTA `manifest.json` version on the server, when present |
+| `status` | ping / status | UI snapshot: `state`, `user`, `lcd` (2×16), `led`, lamp/fan |
 | `ip` | pong | Server LAN IP the module should use |
 | `unix` | pong / exposure | UTC Unix seconds (clock set / **lamp-off end time**) |
 | `iso8601` | pong | Human-readable local time (logging / debug) |
@@ -58,6 +74,8 @@ UTF-8 JSON objects (single datagram, no framing):
 | `users` | users reply | Household ids 1–9, then **`{id:0,name:"Guest"}` last** |
 | `user_id` | therapy / exposure | Key digit **0–9** (0 = Guest) |
 | `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry |
+| `step_minutes` | therapy reply | Increment for keys **C** / **D** (default **15**). C = last + this many minutes; D = last − step |
+| `last_duration_seconds` | therapy reply | Newest exposure duration for that user (`0` if none) |
 | `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held ~5s) |
 | `duration_seconds` | exposure | Actual lamp-on seconds for this run |
 | `error` | therapy / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"bad_duration"` |
@@ -139,8 +157,9 @@ $EDITOR secrets/wifi.yaml
 ```text
 device identity: esp32-…
 DHCP …
-discovery payload: {"v":1,"type":"ping","identity":"esp32-…"}
+discovery payload: {"v":1,"type":"ping","identity":"esp32-…","app":"session_timer","version":"…"}
 discovery pong … identity=… ip=… time_from_disc=1
+firmware matches published …
 wall time from discovery unix=…
 server known: …
 ```
@@ -148,8 +167,8 @@ server known: …
 **Rails log:**
 
 ```text
-[udp_discovery] ping from 192.168.1.x identity=esp32-…
-[udp_discovery] Device#N ip=… identity=esp32-…
+[udp_discovery] ping from 192.168.1.x identity=esp32-… app=session_timer version=…
+[udp_discovery] Device#N ip=… identity=esp32-… fw=…
 [udp_discovery] pong → 192.168.1.x:… ({"v":1,"type":"pong",…,"unix":…})
 ```
 
@@ -162,7 +181,7 @@ python3 - <<'PY'
 import json, socket, time
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.settimeout(2)
-ping = json.dumps({"v":1,"type":"ping","identity":"manual-test"})
+ping = json.dumps({"v":1,"type":"ping","identity":"manual-test","app":"session_timer","version":"dev"})
 s.sendto(ping.encode(), ("127.0.0.1", 3000))
 data, addr = s.recvfrom(1024)
 print(addr, data.decode())
