@@ -87,6 +87,8 @@ static const char *TAG = "session_timer";
 #define BEEP_MS       1000
 /** Fan stays on this long after lamps turn off. */
 #define FAN_RUNDOWN_MS  30000
+/** Fluorescent tubes take about this long to strike before UV is useful. */
+#define LAMP_WARMUP_MS  2000
 
 #define POLL_MS       15
 #define DEBOUNCE_MS   30 /* ~2 polls; keep short so flaky I²C still registers */
@@ -269,6 +271,8 @@ static int s_session_planned_sec = 0;
 static int s_session_user_id = 0;
 static int s_session_therapy_id = 0;
 static int s_session_skin_id = 0;
+/** Nonzero while lamps are striking; countdown has not started yet. */
+static int64_t s_warmup_until_us;
 static int64_t s_last_tick_us = 0;
 static int64_t s_last_input_us = 0;
 
@@ -1056,7 +1060,7 @@ static const char *ui_state_name(void)
 {
     switch (s_state) {
     case ST_RUNNING:
-        return "running";
+        return (s_warmup_until_us > 0) ? "warming" : "running";
     case ST_CLOCK:
         return "clock";
     case ST_USERS:
@@ -1101,6 +1105,7 @@ static cJSON *status_object(void)
     cJSON_AddBoolToObject(st, "fan", s_fan_on);
     cJSON_AddBoolToObject(st, "after_complete", s_after_complete);
     cJSON_AddBoolToObject(st, "test", s_test_flag);
+    cJSON_AddBoolToObject(st, "warmup", s_state == ST_RUNNING && s_warmup_until_us > 0);
 
     cJSON *lcd = cJSON_CreateArray();
     if (lcd) {
@@ -2939,7 +2944,11 @@ static void ui_running_refresh(void)
     /* Keep selected user on top; remaining countdown on the right. */
     format_user_time_line(l0, sizeof(l0), mm, ss);
     /* * left — matches keypad; full 16 cols */
-    snprintf(l1, sizeof(l1), "* abort  Running");
+    if (s_warmup_until_us > 0) {
+        snprintf(l1, sizeof(l1), "* abort  Warming");
+    } else {
+        snprintf(l1, sizeof(l1), "* abort  Running");
+    }
     lcd_status(l0, l1);
 }
 
@@ -3026,13 +3035,15 @@ static void start_session(void)
     s_session_therapy_id = s_therapy_id;
     s_session_skin_id = s_skin_id;
     s_last_tick_us = esp_timer_get_time();
+    s_warmup_until_us = s_last_tick_us + (int64_t)LAMP_WARMUP_MS * 1000;
     s_state = ST_RUNNING;
     s_entry_fresh = true;
     s_after_complete = false;
     note_input();
     lamp_set(true);
     ui_running_refresh();
-    ESP_LOGI(TAG, "start %d s (entry %d) user_id=%d", total, s_entry, s_session_user_id);
+    ESP_LOGI(TAG, "start %d s + %d ms warmup (entry %d) user_id=%d",
+             total, LAMP_WARMUP_MS, s_entry, s_session_user_id);
 }
 
 /** Actual lamp-on seconds for the session that just ended. */
@@ -3059,6 +3070,7 @@ static void session_complete(void)
         s_last_duration_sec = elapsed;
         s_have_last_duration = true;
     }
+    s_warmup_until_us = 0;
     s_state = ST_ENTRY;
     s_entry_fresh = true;
     s_after_complete = true;
@@ -3077,6 +3089,7 @@ static void abort_to_entry(void)
         s_last_duration_sec = elapsed;
         s_have_last_duration = true;
     }
+    s_warmup_until_us = 0;
     s_state = ST_ENTRY;
     s_entry_fresh = true;
     s_after_complete = false;
@@ -3246,6 +3259,21 @@ static void on_key(char k)
 static void tick_running(void)
 {
     int64_t now = esp_timer_get_time();
+    if (s_warmup_until_us > 0) {
+        int mm, ss;
+        remain_to_mmss(s_remain_sec, &mm, &ss);
+        bool colon = ((now / 500000LL) % 2) == 0;
+        show_led_mmss(mm, ss, colon);
+        if (now < s_warmup_until_us) {
+            return;
+        }
+        s_warmup_until_us = 0;
+        s_last_tick_us = now;
+        ui_running_refresh();
+        mark_status_dirty();
+        ESP_LOGI(TAG, "warmup done — counting %d s", s_remain_sec);
+        return;
+    }
     if (now - s_last_tick_us < 1000000LL) {
         int mm, ss;
         remain_to_mmss(s_remain_sec, &mm, &ss);

@@ -98,11 +98,20 @@ Feature: Session timer entry and countdown
   Scenario: Hash starts the countdown and turns the lamp and fan on
     Given the user has entered digits "45"
     When the user presses "#"
-    Then the session is running
-    And the lamp SSR output is on
+    Then the lamp SSR output is on
     And the fan SSR output is on
     And the blue status LED is on
+    And the LCD shows Warming for about 2 seconds while the tubes strike
+    And then the session is running
     And the LED display shows remaining time starting at "00:45"
+    And the logged duration is the countdown (dose), not the warmup
+
+  Scenario: Abort during warmup does not log an exposure
+    Given the user presses "#"
+    And the lamps are still warming
+    When the user presses "*"
+    Then the lamp SSR output is off
+    And no exposure is logged
 
   Scenario: Countdown reaches zero, stops the lamp, and beeps
     Given the user has entered digits "5"
