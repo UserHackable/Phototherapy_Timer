@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_12_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_13_050000) do
   create_table "devices", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "firmware_app"
@@ -43,6 +43,44 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_140000) do
     t.index ["user_id"], name: "index_sessions_on_user_id"
   end
 
+  create_table "skin_types", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.integer "initial_seconds"
+    t.integer "max_seconds"
+    t.integer "number", null: false
+    t.string "roman", null: false
+    t.integer "step_seconds"
+    t.datetime "updated_at", null: false
+    t.index ["number"], name: "index_skin_types_on_number", unique: true
+    t.index ["roman"], name: "index_skin_types_on_roman", unique: true
+  end
+
+  create_table "therapy_types", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.integer "initial_seconds"
+    t.integer "max_seconds"
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.integer "step_seconds"
+    t.datetime "updated_at", null: false
+    t.boolean "uses_skin_type", default: false, null: false
+    t.index ["slug"], name: "index_therapy_types_on_slug", unique: true
+  end
+
+  create_table "user_therapies", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "skin_type_id"
+    t.integer "therapy_type_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["skin_type_id"], name: "index_user_therapies_on_skin_type_id"
+    t.index ["therapy_type_id"], name: "index_user_therapies_on_therapy_type_id"
+    t.index ["user_id", "therapy_type_id"], name: "index_user_therapies_on_user_id_and_therapy_type_id", unique: true
+    t.index ["user_id"], name: "index_user_therapies_on_user_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "email_address", null: false
@@ -55,4 +93,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_140000) do
 
   add_foreign_key "exposures", "users"
   add_foreign_key "sessions", "users"
+  add_foreign_key "user_therapies", "skin_types"
+  add_foreign_key "user_therapies", "therapy_types"
+  add_foreign_key "user_therapies", "users"
 end

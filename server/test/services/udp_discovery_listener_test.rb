@@ -232,8 +232,9 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal user.name, data["name"]
     assert data["recommended_seconds"].is_a?(Integer)
     assert data["recommended_seconds"] >= 0
-    assert_equal UdpDiscoveryListener::DEFAULT_STEP_MINUTES, data["step_minutes"]
-    assert_equal 15, data["step_minutes"]
+    assert_equal 16, data["step_seconds"]
+    assert_equal 333, data["max_seconds"]
+    assert_equal 50, data["initial_seconds"]
     assert data["last_duration_seconds"].is_a?(Integer)
     assert data["last_duration_seconds"] >= 0
     assert_not data.key?("error")
@@ -266,7 +267,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       assert_match(/ago/, lines[1])
       assert_operator lines[1].length, :<=, 16
       assert_equal 0, data["recommended_seconds"]
-      assert_equal 15, data["step_minutes"]
+      assert_equal 16, data["step_seconds"]
       assert_equal 90, data["last_duration_seconds"]
     end
   end
@@ -296,7 +297,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       )
       data = JSON.parse(reply)
       assert_equal 105, data["recommended_seconds"]
-      assert_equal 15, data["step_minutes"]
+      assert_equal 16, data["step_seconds"]
       assert_equal 105, data["last_duration_seconds"]
     end
   end
@@ -310,7 +311,10 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     )
     data = JSON.parse(reply)
     assert_equal "No prior session", data["message"]
-    assert_equal 15, data["step_minutes"]
+    assert_equal 50, data["recommended_seconds"]
+    assert_equal 16, data["step_seconds"]
+    assert_equal 333, data["max_seconds"]
+    assert_equal 50, data["initial_seconds"]
     assert_equal 0, data["last_duration_seconds"]
   end
 
@@ -319,7 +323,9 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
       user_id: 4,
       name: "miriam",
       recommended_seconds: 30,
-      step_minutes: 15,
+      step_seconds: 16,
+      max_seconds: 333,
+      initial_seconds: 50,
       last_duration_seconds: 90,
       message: "Last session 2d ago"
     )
@@ -328,7 +334,9 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 4, data["user_id"]
     assert_equal "miriam", data["name"]
     assert_equal 30, data["recommended_seconds"]
-    assert_equal 15, data["step_minutes"]
+    assert_equal 16, data["step_seconds"]
+    assert_equal 333, data["max_seconds"]
+    assert_equal 50, data["initial_seconds"]
     assert_equal 90, data["last_duration_seconds"]
     assert_equal "Last session 2d ago", data["message"]
   end
@@ -343,7 +351,9 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 999_999, data["user_id"]
     assert_equal "not_found", data["error"]
     assert_not data.key?("recommended_seconds")
-    assert_not data.key?("step_minutes")
+    assert_not data.key?("step_seconds")
+    assert_not data.key?("max_seconds")
+    assert_not data.key?("initial_seconds")
     assert_not data.key?("last_duration_seconds")
   end
 
@@ -354,6 +364,83 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     )
     data = JSON.parse(reply)
     assert_equal "bad_user_id", data["error"]
+  end
+
+  test "handle_packet therapies returns keypad lists" do
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_therapies_request(identity: "esp-therapies"),
+      "192.168.50.60"
+    )
+    data = JSON.parse(reply)
+    assert_equal "therapies", data["type"]
+    ids = data["therapies"].map { |t| t["id"] }
+    assert_equal [ 1, 2, 4 ], ids
+    manual = data["therapies"].find { |t| t["id"] == 1 }
+    assert_equal "Manual", manual["name"]
+    assert_equal false, manual["uses_skin_type"]
+    psoriasis = data["therapies"].find { |t| t["id"] == 2 }
+    assert_equal "Psoriasis", psoriasis["name"]
+    assert_equal true, psoriasis["uses_skin_type"]
+    eczema = data["therapies"].find { |t| t["id"] == 4 }
+    assert_equal "Eczema", eczema["name"]
+    assert_equal [ 1, 3 ], data["skin_types"].map { |s| s["id"] }
+    assert_equal "Type I", data["skin_types"].first["name"]
+    assert_equal "192.168.50.60", Device.find_by!(identity: "esp-therapies").ip
+  end
+
+  test "handle_packet assign_therapy sets manual for guest" do
+    User.ensure_guest!
+    guest = User.find(0)
+    UserTherapy.where(user_id: 0).delete_all
+
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_assign_therapy_request(
+        identity: "esp-assign-manual", user_id: 0, therapy_id: 1
+      ),
+      "192.168.50.61"
+    )
+    data = JSON.parse(reply)
+    assert_equal "assign_therapy", data["type"]
+    assert_equal true, data["ok"]
+    assert_equal 0, data["user_id"]
+    assert_equal 1, data["therapy_id"]
+    assignment = guest.user_therapies.newest_first.first
+    assert_equal therapy_types(:manual), assignment.therapy_type
+    assert_nil assignment.skin_type
+    assert_equal 15, guest.therapy_step_seconds
+    assert_equal 30, guest.therapy_initial_seconds
+  end
+
+  test "handle_packet assign_therapy requires skin for psoriasis" do
+    user = users(:two)
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_assign_therapy_request(
+        identity: "esp-assign-need-skin", user_id: user.id, therapy_id: 2
+      ),
+      "192.168.50.62"
+    )
+    data = JSON.parse(reply)
+    assert_equal false, data["ok"]
+    assert_equal "need_skin", data["error"]
+  end
+
+  test "handle_packet assign_therapy sets psoriasis skin type" do
+    user = users(:two)
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_assign_therapy_request(
+        identity: "esp-assign-pso", user_id: user.id, therapy_id: 2, skin_id: 3
+      ),
+      "192.168.50.63"
+    )
+    data = JSON.parse(reply)
+    assert_equal true, data["ok"]
+    assert_equal 2, data["therapy_id"]
+    assert_equal 3, data["skin_id"]
+    assignment = user.user_therapies.find_by!(therapy_type: therapy_types(:psoriasis))
+    assert_equal skin_types(:three), assignment.skin_type
+    assert_equal 20, user.therapy_step_seconds
+    assert_equal 83, user.therapy_initial_seconds
+    assert_equal 500, user.therapy_max_seconds
   end
 
   test "handle_packet therapy allows guest id 0" do
@@ -367,7 +454,9 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 0, data["user_id"]
     assert_equal "Guest", data["name"]
     assert_equal 30, data["recommended_seconds"]
-    assert_equal 15, data["step_minutes"]
+    assert_equal 10, data["step_seconds"]
+    assert_equal 1200, data["max_seconds"]
+    assert_equal 30, data["initial_seconds"]
     assert data["last_duration_seconds"].is_a?(Integer)
     assert_not data.key?("error")
   end

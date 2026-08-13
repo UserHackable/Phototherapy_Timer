@@ -181,13 +181,13 @@ Working LAN stack and session UI (early product, not medical dosing):
 |------|------------------|
 | **session_timer** | MMSS entry (default **00:30**), `#` start / `*` clear or abort, idle clock |
 | **Displays** | LCD: user + time top, date bottom in clock mode; TM1637: wall clock or countdown |
-| **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (default **30 s**); **C** / **D** = last ± **15 min** |
+| **Users** | Key **A** lists household + **Guest** last; digit **0–9** loads therapy (`initial_seconds` if no prior session); **B** assigns therapy / skin; **\*** restores initial; **C** / **D** = recommended ± step, or stay **0** if recommended is 0 |
 | **Lamp / fan** | Lamps **GPIO26** + LED **GPIO2**; fan **GPIO27** on with lamps, **30 s** rundown after off |
 | **Exposure log** | Lamp-off UDP → Rails `Exposure` under `/users/:id/exposures` |
-| **LAN OTA** | Dual-OTA partitions; idle poll + SHA-256; **B** or `/devices` Check for update; publish via `./scripts/fw idf ota-publish` |
+| **LAN OTA** | Dual-OTA partitions; idle poll + SHA-256; `/devices` Check for update; publish via `./scripts/fw idf ota-publish` |
 | **Firmware version** | Module ping reports git SHA; `/devices` shows it vs published OTA manifest |
 | **Module status** | UDP `status` + ping snapshot: mode, LCD 2×16, LED, lamp/fan — shown on `/devices` |
-| **Rails** | Auth, devices, users, exposures, firmware files; UDP ping/pong/users/therapy/exposure |
+| **Rails** | Auth, devices, users, exposures, firmware files; UDP ping/pong/users/therapies/assign/therapy/exposure |
 
 ## Remotes
 

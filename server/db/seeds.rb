@@ -1,32 +1,26 @@
 # frozen_string_literal: true
 
-# Load users from db/data/users.yaml (names in order).
-# Emails are <name>@ferney.org. Passwords are set only here (not in the YAML).
-# Guest (id 0) is always ensured for anonymous timer sessions.
-require "yaml"
-
+# Guest is always ensured (id 0) for anonymous timer sessions.
+# Household users and skin types come from db/data via data_imp (upsert, no wipe).
 seed_password = ENV.fetch("SEED_USER_PASSWORD", "password")
 
 guest = User.ensure_guest!(password: seed_password)
 puts "  [0] user #{guest.name} <#{guest.email_address}> id=#{guest.id}"
 
-users_path = Rails.root.join("db/data/users.yaml")
-rows = YAML.safe_load_file(users_path, permitted_classes: [], aliases: false)
-raise "db/data/users.yaml must be a list of user hashes" unless rows.is_a?(Array)
-
-rows.each_with_index do |row, index|
-  name = row.fetch("name").to_s.strip
-  email = "#{name.downcase}@ferney.org"
-
-  user = User.find_or_initialize_by(email_address: email)
-  user.name = name
-  # Only set password when creating so re-seeding does not reset real passwords.
-  if user.new_record?
-    user.password = seed_password
-    user.password_confirmation = seed_password
-  end
-  user.save!
-  puts "  [#{index + 1}] user #{user.name} <#{user.email_address}> id=#{user.id}"
+DataImp.import +"users.yaml"
+User.household.each do |user|
+  puts "  [#{user.id}] user #{user.name} <#{user.email_address}>"
 end
+puts "Seeded guest + #{User.household.count} household users via data_imp from db/data/users.yaml"
 
-puts "Seeded guest + #{rows.size} household users from #{users_path.relative_path_from(Rails.root)}"
+DataImp.import +"skin_types.yml"
+SkinType.ordered.each do |st|
+  puts "  [#{st.number}] skin type #{st.roman} — #{st.description}"
+end
+puts "Seeded #{SkinType.count} skin types via data_imp from db/data/skin_types.yml"
+
+DataImp.import +"therapy_types.yml"
+TherapyType.ordered.each do |tt|
+  puts "  [#{tt.slug}] #{tt.name} skin_type=#{tt.uses_skin_type?}"
+end
+puts "Seeded #{TherapyType.count} therapy types via data_imp from db/data/therapy_types.yml"

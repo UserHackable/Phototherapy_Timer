@@ -1,0 +1,42 @@
+# SolRx E-Series UVBNB User's Manual Rev 3.3A (May 2026), Table 1 – Skin Types.
+# Used for psoriasis EGT selection. Not required for vitiligo or
+# atopic dermatitis (eczema). Physician estimate; not a prescription.
+---
+- number: 1
+  roman: I
+  step_seconds: 16
+  max_seconds: 333
+  initial_seconds: 50
+  description: Always burns, never tans
+- number: 2
+  roman: II
+  step_seconds: 16
+  max_seconds: 333
+  initial_seconds: 50
+  description: Always burns, sometimes tans
+- number: 3
+  roman: III
+  step_seconds: 20
+  max_seconds: 500
+  initial_seconds: 83
+  description: Sometimes burns, always tans
+- number: 4
+  roman: IV
+  step_seconds: 20
+  max_seconds: 500
+  initial_seconds: 83
+  description: Never burns, always tans
+- number: 5
+  roman: V
+  step_seconds: 25
+  max_seconds: 833
+  initial_seconds: 133
+  description: >-
+    “Brown” or moderately pigmented. Includes Asiatic, Mexican,
+    American Indian & others.
+- number: 6
+  roman: VI
+  step_seconds: 25
+  max_seconds: 833
+  initial_seconds: 133
+  description: “Black”

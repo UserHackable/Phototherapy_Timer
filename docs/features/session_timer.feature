@@ -5,8 +5,11 @@
 # Piezo GPIO25 end beep. Displays: LCD1602 + TM1637.
 # Wi‑Fi + UDP JSON discovery; SNTP fallback.
 # Key A: users list (household + Guest); digit 0–9: therapy → entry.
-# Key C: last exposure + step_minutes; D: last − step (default 15 minutes).
-# Default entry / therapy: 30 seconds. Exposure log on lamp off.
+# Key B: therapy list; digit selects type; psoriasis then skin type 1–6.
+# Key C: recommended + step_seconds; D: recommended − step (EGT / Manual 15 s / else 10 s).
+# If recommended_seconds is 0 (too soon), C and D stay at 0.
+# Key *: restore initial_seconds (EGT listed initial; Manual / none 30 s).
+# Boot default entry: 30 seconds until a therapy reply. Exposure log on lamp off.
 #
 # Not automated yet — product contract (see docs/features/README.md).
 
@@ -44,10 +47,12 @@ Feature: Session timer entry and countdown
     When the session completes
     Then the LCD top line still shows "rob" with the sticky time on the right
 
-  Scenario: Star restores default time but keeps the selected user
-    Given user "rob" is selected with a programmed time
+  Scenario: Star restores initial dose but keeps the selected user
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included initial_seconds 50
+    And the user has entered digits "134"
     When the user presses "*"
-    Then the programmed duration is 0 minutes and 30 seconds
+    Then the programmed duration is 0 minutes and 50 seconds
     And the LCD top line still shows "rob"
 
   # --- Time entry (MMSS) ---------------------------------------------------
@@ -132,6 +137,46 @@ Feature: Session timer entry and countdown
     And pages advance every one second
     And after 30 seconds the UI returns to clock mode
 
+  Scenario: Key B requests the therapy list from the server
+    Given the module has discovered the Rails server over UDP
+    And a household user is selected (or Guest if none)
+    When the user presses "B" in entry mode
+    Then the module sends a JSON therapies request with its identity
+    And the server replies with keypad therapies 1 Manual, 2 Psoriasis, 3 Vitiligo, 4 Eczema
+    And the reply includes skin types 1–6
+    And the LCD shows two therapies per page, one id:name per line
+    And the TM1637 keeps showing wall clock HH:MM
+    And pages advance every one second
+    And after 30 seconds the UI returns to clock mode
+
+  Scenario: B then 1 assigns Manual and reloads recommendation
+    Given the UI is paging the therapy list
+    And Guest is the selected user
+    When the user presses "1"
+    Then the module assigns therapy_id 1 (Manual) to the selected user
+    And it requests therapy for that user
+    And the entry is programmed from recommended_seconds
+    And step_seconds is 15 and initial_seconds is 30
+
+  Scenario: B then 2 pages skin types for Psoriasis
+    Given the UI is paging the therapy list
+    When the user presses "2"
+    Then the LCD pages skin types 1:Type I through 6:Type VI
+    And no assignment is sent yet
+
+  Scenario: B then 2 then 1 assigns Psoriasis Type I
+    Given the UI is paging skin types after Psoriasis was chosen
+    And household user "rob" is selected
+    When the user presses "1"
+    Then the module assigns therapy_id 2 and skin_id 1 to rob
+    And it requests therapy for rob
+    And recommended / step / max / initial come from psoriasis Type I
+
+  Scenario: B during skin paging returns to the therapy list
+    Given the UI is paging skin types
+    When the user presses "B"
+    Then the UI returns to the therapy list
+
   Scenario: A then 0 selects Guest and loads recommended exposure
     Given the UI is paging the household user list including Guest
     When the user presses "0"
@@ -172,37 +217,52 @@ Feature: Session timer entry and countdown
     And the entry field is programmed to 0 minutes and 30 seconds
     And the LCD top line shows the selected user with the recommended time
 
-  Scenario: Key C programs last exposure plus step minutes
+  Scenario: Key C programs recommended plus step seconds
     Given the user selected household user "rob" via A then their id digit
-    And the therapy reply included last_duration_seconds 90 and step_minutes 15
+    And the therapy reply included recommended_seconds 90 and step_seconds 16
     When the user presses "C" in entry mode
-    Then the entry is programmed to last exposure plus 15 minutes (16:30)
-    And the LED display shows "16:30"
-    And the LCD top line shows "rob" with "16:30" on the right
+    Then the entry is programmed to recommended plus 16 seconds (1:46)
+    And the LED display shows "01:46"
+    And the LCD top line shows "rob" with "1:46" on the right
     And "#" will start that time
 
-  Scenario: Key C with no prior exposure uses only the step
+  Scenario: Key C with no prior exposure steps from the initial recommendation
     Given the user selected Guest via A then 0
-    And the therapy reply included last_duration_seconds 0 and step_minutes 15
+    And the therapy reply included recommended_seconds 30, last_duration_seconds 0 and step_seconds 10
     When the user presses "C"
-    Then the entry is programmed to 15 minutes and 0 seconds
-    And the LED display shows "15:00"
+    Then the entry is programmed to 0 minutes and 40 seconds
+    And the LED display shows "00:40"
 
-  Scenario: Key D programs last exposure minus step minutes
+  Scenario: Key C stays at zero when recommended is zero
     Given the user selected household user "rob" via A then their id digit
-    And the therapy reply included last_duration_seconds 990 and step_minutes 15
+    And the therapy reply included recommended_seconds 0, last_duration_seconds 90 and step_seconds 16
+    When the user presses "C"
+    Then the entry is programmed to 0 minutes and 0 seconds
+    And the LED display shows "00:00"
+    And "#" will not start until a positive time is set
+
+  Scenario: Key D programs recommended minus step seconds
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included recommended_seconds 90 and step_seconds 16
     When the user presses "D" in entry mode
-    Then the entry is programmed to last exposure minus 15 minutes (1:30)
-    And the LED display shows "01:30"
-    And the LCD top line shows "rob" with "1:30" on the right
+    Then the entry is programmed to recommended minus 16 seconds (1:14)
+    And the LED display shows "01:14"
+    And the LCD top line shows "rob" with "1:14" on the right
 
-  Scenario: Key D floors at zero when last is shorter than the step
+  Scenario: Key D floors at zero when recommended is shorter than the step
     Given the user selected household user "rob" via A then their id digit
-    And the therapy reply included last_duration_seconds 90 and step_minutes 15
+    And the therapy reply included recommended_seconds 10 and step_seconds 16
     When the user presses "D"
     Then the entry is programmed to 0 minutes and 0 seconds
     And the LED display shows "00:00"
     And "#" will not start until a positive time is set
+
+  Scenario: Key D stays at zero when recommended is zero
+    Given the user selected household user "rob" via A then their id digit
+    And the therapy reply included recommended_seconds 0, last_duration_seconds 90 and step_seconds 16
+    When the user presses "D"
+    Then the entry is programmed to 0 minutes and 0 seconds
+    And the LED display shows "00:00"
 
   Scenario: Digit for unknown user id does not load exposure
     Given the UI is paging the household user list
@@ -306,9 +366,9 @@ Feature: Session timer entry and countdown
       | *     | the entry field is cleared                          |
       | 1     | a new entry begins with digit 1                     |
       | A     | the entry UI is shown without changing sticky time  |
-      | B     | an immediate OTA check is requested                 |
-      | C     | last exposure plus step_minutes is programmed       |
-      | D     | last exposure minus step_minutes is programmed      |
+      | B     | the therapy list is requested                       |
+      | C     | recommended plus step_seconds is programmed         |
+      | D     | recommended minus step_seconds is programmed        |
 
   # --- Network -------------------------------------------------------------
 
@@ -317,20 +377,13 @@ Feature: Session timer entry and countdown
     When the device boots
     Then it attempts to connect and synchronize wall time
 
-  Scenario: Key B checks for a firmware update now
-    Given the module has discovered the Rails server over UDP
-    And the UI is not in a running session
-    When the user presses "B"
-    Then the LCD shows a checking-for-update message
-    And the module GETs /firmware/session_timer/manifest.json immediately
-    And if the published version differs it installs and reboots
-    And if it matches the LCD shows "Up to date" with the running version
-
   Scenario: Server can poke the module to check for updates
     Given the module is listening on UDP 3000
     When the admin clicks "Check for update" on the device page
     Then the server sends {"type":"ota"} to the module
-    And the module behaves as if key B was pressed
+    And the module GETs /firmware/session_timer/manifest.json immediately
+    And if the published version differs it installs and reboots
+    And if it matches the LCD shows "Up to date" with the running version
 
   Scenario: Module reports UI state and display text
     Given the module has discovered the Rails server over UDP

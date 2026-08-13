@@ -38,15 +38,37 @@ UTF-8 JSON objects (single datagram, no framing):
 // Server → ESP (household first; Guest id 0 always last for A+0)
 {"v":1,"type":"users","users":[{"id":1,"name":"rob"},{"id":2,"name":"shirlene"},{"id":0,"name":"Guest"}]}
 
+// ESP → server (key B): therapy + skin keypad lists
+{"v":1,"type":"therapies","identity":"esp32-b4bfe9e70e64"}
+
+// Server → ESP (stable keypad ids: 1 Manual, 2 Psoriasis, 3 Vitiligo, 4 Eczema)
+{"v":1,"type":"therapies",
+ "therapies":[{"id":1,"name":"Manual","uses_skin_type":false},
+              {"id":2,"name":"Psoriasis","uses_skin_type":true},
+              {"id":3,"name":"Vitiligo","uses_skin_type":false},
+              {"id":4,"name":"Eczema","uses_skin_type":false}],
+ "skin_types":[{"id":1,"name":"Type I"},{"id":2,"name":"Type II"},
+               {"id":3,"name":"Type III"},{"id":4,"name":"Type IV"},
+               {"id":5,"name":"Type V"},{"id":6,"name":"Type VI"}]}
+
+// ESP → server (B then digits): assign to selected user (0 = Guest)
+{"v":1,"type":"assign_therapy","identity":"esp32-…","user_id":4,"therapy_id":2,"skin_id":1}
+
+// Server → ESP
+{"v":1,"type":"assign_therapy","ok":true,"user_id":4,"therapy_id":2,"skin_id":1}
+
 // ESP → server (key A, then digit = user id): therapy recommendation
 {"v":1,"type":"therapy","identity":"esp32-b4bfe9e70e64","user_id":4}
 
-// Server → ESP (default recommended_seconds is 30 until per-user schedules exist)
+// Server → ESP. recommended_seconds is last exposure after 44h, 0 if more recent,
+// else initial_seconds. * on the module restores initial_seconds.
 // Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
 // Server fills message from that user's newest Exposure (e.g. "Last session 1d 22h ago").
-// step_minutes (default 15) + last_duration_seconds: C = last + step, D = last − step.
-{"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":30,
- "step_minutes":15,"last_duration_seconds":90,
+// C = recommended + step, D = recommended − step.
+// Happy path: recommended_seconds is last duration. If recommended is 0, C and D stay at 0.
+{"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":50,
+ "step_seconds":16,"max_seconds":333,"initial_seconds":50,
+ "last_duration_seconds":90,
  "message":"Last session\n1:30 0d9h44m ago"}
 
 // ESP → server when the lamp turns off (complete or abort with ≥1 s on)
@@ -59,8 +81,8 @@ UTF-8 JSON objects (single datagram, no framing):
 | Field | Where | Meaning |
 |-------|--------|---------|
 | `v` | both | Protocol version (**1**) |
-| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapy"`, `"exposure"`, `"status"`, or `"ota"` |
-| `ota` | web → server → module | Immediate firmware check (key **B** does the same on-device) |
+| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapies"`, `"assign_therapy"`, `"therapy"`, `"exposure"`, `"status"`, or `"ota"` |
+| `ota` | web → server → module | Immediate firmware check (`/devices` **Check for update**) |
 | `identity` | both | Device id (`esp32-` + MAC) or server hostname |
 | `app` | ping / pong | Firmware app name (`session_timer`) |
 | `version` | ping | Running image version (git short SHA from `esp_app_desc`) |
@@ -73,13 +95,19 @@ UTF-8 JSON objects (single datagram, no framing):
 | `tz_offset` | pong | Seconds east of UTC at pong time (e.g. `-21600`) |
 | `tz_posix` | pong | POSIX `TZ` string for ESP `setenv` (override: `UDP_DISCOVERY_TZ_POSIX`) |
 | `users` | users reply | Household ids 1–9, then **`{id:0,name:"Guest"}` last** |
-| `user_id` | therapy / exposure | Key digit **0–9** (0 = Guest) |
-| `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry |
-| `step_minutes` | therapy reply | Increment for keys **C** / **D** (default **15**). C = last + this many minutes; D = last − step |
+| `therapies` | therapies reply | Keypad **1–4**: Manual, Psoriasis, Vitiligo, Eczema; `uses_skin_type` for psoriasis |
+| `skin_types` | therapies reply | Keypad **1–6** (Table 1 I–VI) |
+| `therapy_id` | assign_therapy | Key **B** digit **1–4** |
+| `skin_id` | assign_therapy | Skin digit **1–6** when the therapy needs a skin type |
+| `user_id` | therapy / assign / exposure | Key digit **0–9** (0 = Guest) |
+| `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry. Last exposure after 44h, **0** if more recent, else `initial_seconds` |
+| `step_seconds` | therapy reply | Increment for keys **C** / **D** against `recommended_seconds`. From the user's newest therapy assignment (EGT / Manual **15**), else **10** |
+| `max_seconds` | therapy reply | Hard cap for programmed time. EGT listed max, Manual / none **1200** (20:00) |
+| `initial_seconds` | therapy reply | First-session dose. EGT listed initial (psoriasis I–II **50**, III–IV **83**, V–VI **133**; vitiligo / eczema **50**); Manual / none **30**. Key **\*** restores this |
 | `last_duration_seconds` | therapy reply | Newest exposure duration for that user (`0` if none) |
 | `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held ~5s) |
 | `duration_seconds` | exposure | Actual lamp-on seconds for this run |
-| `error` | therapy / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"bad_duration"` |
+| `error` | therapy / assign / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"need_skin"`, `"bad_duration"` |
 
 **Guest:** seeded `User` with **id 0**, name `Guest`. Always last in the key-A list; select with **A** then **0**. Also the default label when nobody is selected.
 

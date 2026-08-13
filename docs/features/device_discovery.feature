@@ -82,8 +82,10 @@ Feature: LAN device discovery over UDP JSON
     Then the server replies with type "therapy"
     And user_id is 4
     And name matches that user
-    And recommended_seconds is 30 by default
-    And step_minutes is 15
+    And recommended_seconds is last duration after 44h, 0 if more recent, else initial_seconds
+    And step_seconds is the user's EGT step, Manual 15, or 10 if none
+    And max_seconds is the user's EGT listed max, Manual or none 1200
+    And initial_seconds is the user's EGT listed initial, Manual 30, or 30 if none
     And last_duration_seconds is that user's newest exposure duration, or 0
     And the sending device is upserted like a ping
 
@@ -107,9 +109,35 @@ Feature: LAN device discovery over UDP JSON
   Scenario: Therapy for Guest id 0 returns recommended exposure
     When the ESP sends therapy with user_id 0
     Then recommended_seconds is 30
-    And step_minutes is 15
+    And step_seconds is 10
+    And max_seconds is 1200
+    And initial_seconds is 30
     And last_duration_seconds is Guest's newest exposure duration, or 0
     And name is Guest
+
+  Scenario: Therapies request returns keypad therapy and skin lists
+    When the ESP sends {"v":1,"type":"therapies","identity":"esp32-…"}
+    Then the server replies with type "therapies"
+    And therapies is 1 Manual, 2 Psoriasis, 3 Vitiligo, 4 Eczema
+    And Psoriasis has uses_skin_type true
+    And skin_types is 1–6 Type I–VI
+    And the sending device is upserted like a ping
+
+  Scenario: Assign therapy Manual to Guest
+    When the ESP sends assign_therapy user_id 0 therapy_id 1
+    Then the reply is ok true
+    And Guest has a Manual assignment
+    And later therapy requests use Manual step 15 and initial 30
+
+  Scenario: Assign psoriasis without skin returns need_skin
+    When the ESP sends assign_therapy user_id 4 therapy_id 2
+    Then the reply is ok false error need_skin
+
+  Scenario: Assign psoriasis with skin type updates the user
+    When the ESP sends assign_therapy user_id 4 therapy_id 2 skin_id 1
+    Then the reply is ok true
+    And that user has Psoriasis — Type I
+    And later therapy requests use Type I step / max / initial
 
   # --- Time preference (device side; contract with session_timer) ----------
 

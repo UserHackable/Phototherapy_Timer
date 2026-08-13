@@ -6,6 +6,8 @@ class User < ApplicationRecord
   has_secure_password
   has_many :sessions, dependent: :destroy
   has_many :exposures, dependent: :destroy
+  has_many :user_therapies, dependent: :destroy
+  has_many :therapy_types, through: :user_therapies
 
   validates :name, presence: true
   validates :email_address, presence: true
@@ -17,6 +19,27 @@ class User < ApplicationRecord
 
   def guest?
     id == GUEST_ID
+  end
+
+  # Newest assigned therapy's EGT step, or the default if none / incomplete.
+  def therapy_step_seconds(default: 10)
+    therapy_duration(:step_seconds, default: default)
+  end
+
+  def therapy_max_seconds(default: 1200)
+    therapy_duration(:max_seconds, default: default)
+  end
+
+  def therapy_initial_seconds(default: 30)
+    therapy_duration(:initial_seconds, default: default)
+  end
+
+  def therapy_duration(field, default:)
+    user_therapies.includes(:therapy_type, :skin_type).newest_first.each do |assignment|
+      sec = assignment.public_send(field)
+      return sec if sec.present?
+    end
+    default
   end
 
   # Guest is id 0 (anonymous keypad sessions). Forced insert — AR often skips id 0.

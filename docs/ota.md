@@ -13,8 +13,8 @@ the inactive slot).
 |------|--------|
 | Apps | `session_timer` (product), `ota_smoke` (bench), `wifi_connect` (same table) |
 | Poll | First check ~20 s after boot (after mark-valid); then every ~15 min when idle |
-| Trigger | Key **B**, or **Check for update** on `/devices` (UDP `type:ota` to the module) |
-| Gates | No OTA during a lamp session or A-key user-list paging |
+| Trigger | **Check for update** on `/devices` (UDP `type:ota` to the module) |
+| Gates | No OTA during a lamp session or A/B list paging |
 | Version | Build stamps `esp_app_desc.version` with git short SHA (`PROJECT_VER`); `ota-publish` copies that into `manifest.json`. Module ping reports `version`; `/devices` compares it to published |
 | Host | Discovered Rails IP or NVS `discovery/server_ip` |
 
@@ -68,9 +68,10 @@ Other apps may stay on single-app until needed.
    writes the inactive slot, reboots.
 5. After a healthy boot it marks the image valid (bootloader rollback cancelled).
 
-To check **now** instead of waiting ~15 minutes: press **B** on the keypad, or
-**Check for update** on `/devices`. The module listens on UDP **3000** for
+To check **now** instead of waiting ~15 minutes: **Check for update** on
+`/devices`. The module listens on UDP **3000** for
 `{"v":1,"type":"ota","identity":"esp32-…"}`. Busy sessions defer until idle.
+Key **B** selects therapy / skin type (not OTA).
 
 Publish a new build from a machine with the toolchain and SSH/docker on ami
 (`OTA_SSH` defaults to the first reachable of `ami` or `deploy@192.168.1.202`):

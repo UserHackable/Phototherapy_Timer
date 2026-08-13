@@ -19,6 +19,11 @@ class UserTest < ActiveSupport::TestCase
     assert_equal "rob@ferney.org", user.email_address
   end
 
+  test "has many user therapies" do
+    assert_includes users(:one).user_therapies, user_therapies(:one_psoriasis)
+    assert_includes users(:one).therapy_types, therapy_types(:psoriasis)
+  end
+
   test "has many exposures" do
     assert_includes users(:one).exposures, exposures(:one)
     assert_not_includes users(:one).exposures, exposures(:two)
@@ -32,6 +37,21 @@ class UserTest < ActiveSupport::TestCase
     assert guest.guest?
     # idempotent
     assert_equal guest.id, User.ensure_guest!.id
+  end
+
+  test "users import updates name and does not duplicate or reset password" do
+    DataImp.import "users.yaml"
+    user = User.find_by!(email_address: "rob@ferney.org")
+    digest = user.password_digest
+    user.update!(name: "Robert")
+    count = User.where("id > 0").count
+
+    assert_no_difference("User.count") { DataImp.import "users.yaml" }
+
+    user.reload
+    assert_equal "Rob", user.name
+    assert_equal digest, user.password_digest
+    assert_equal count, User.where("id > 0").count
   end
 
   test "household scope excludes guest" do

@@ -15,4 +15,47 @@
   — <%= link_to "View log", user_exposures_path(@user) %>
 </p>
 
+<h2>Therapies</h2>
+<% if @user_therapies.any? %>
+  <ul>
+    <% @user_therapies.each do |assignment| %>
+      <li>
+        <%= assignment.label %>
+        <%= button_to "Remove", user_user_therapy_path(@user, assignment), method: :delete, form: { style: "display: inline" } %>
+      </li>
+    <% end %>
+  </ul>
+<% else %>
+  <p>No therapies assigned.</p>
+<% end %>
+
+<%= form_with model: [ @user, @user_therapy ], data: { controller: "therapy-form" } do |form| %>
+  <% if @user_therapy.errors.any? %>
+    <div style="color: red">
+      <ul>
+        <% @user_therapy.errors.each do |error| %>
+          <li><%= error.full_message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :therapy_type_id, "Therapy" %>
+    <%= form.select :therapy_type_id,
+          TherapyType.ordered.map { |tt|
+            [ tt.label, tt.id, { data: { uses_skin_type: tt.uses_skin_type? } } ]
+          },
+          { include_blank: "Select therapy" },
+          { data: { therapy_form_target: "therapy", action: "change->therapy-form#changed" } } %>
+  </div>
+  <div data-therapy-form-target="skinType" hidden>
+    <%= form.label :skin_type_id, "Skin type" %>
+    <%= form.collection_select :skin_type_id, SkinType.ordered, :id, :label, include_blank: "Select skin type" %>
+  </div>
+  <div>
+    <%= form.submit "Assign therapy" %>
+  </div>
+<% end %>
+
 <%= link_to "All users", users_path %>

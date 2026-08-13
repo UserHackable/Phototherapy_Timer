@@ -17,9 +17,12 @@ require "socket"
 #      "status":{"state":"entry","lcd":["Guest      0:30","* clear  start #"],"led":"00:30"}}
 #     {"v":1,"type":"status","identity":"esp32-<mac>","app":"session_timer",
 #      "status":{"state":"running","user":"rob","lcd":["rob        0:29","* abort  Running"]}}
-#     {"v":1,"type":"ota","identity":"esp32-<mac>"}  # web / key-B poke → module checks now
+#     {"v":1,"type":"ota","identity":"esp32-<mac>"}  # web poke → module checks now
 #     {"v":1,"type":"users","identity":"esp32-<mac>"}   # user list request (key A)
 #     {"v":1,"type":"therapy","identity":"esp32-<mac>","user_id":4}  # A then digit
+#     {"v":1,"type":"therapies","identity":"esp32-<mac>"}  # key B: therapy + skin lists
+#     {"v":1,"type":"assign_therapy","identity":"esp32-<mac>",
+#      "user_id":4,"therapy_id":2,"skin_id":1}  # B then digits
 #     {"v":1,"type":"exposure","identity":"esp32-<mac>",
 #      "user_id":0,"duration_seconds":30,"unix":1710000000}  # lamp off
 #   Server → client:
@@ -28,14 +31,19 @@ require "socket"
 #      "tz_offset":-21600,"tz_posix":"MST7MDT,M3.2.0,M11.1.0",
 #      "published_version":"99eab52"}  # OTA manifest version when known
 #     {"v":1,"type":"users","users":[{"id":1,"name":"rob"}, ...]}  # ids 1–9 (not Guest)
-#     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":30,
-#      "step_minutes":15,"last_duration_seconds":90}
+#     {"v":1,"type":"therapies","therapies":[{"id":1,"name":"Manual","uses_skin_type":false},…],
+#      "skin_types":[{"id":1,"name":"Type I"},…]}
+#     {"v":1,"type":"assign_therapy","ok":true,"user_id":4,"therapy_id":2,"skin_id":1}
+#     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":50,
+#      "step_seconds":16,"max_seconds":333,"initial_seconds":50,
+#      "last_duration_seconds":90}
 #     # optional: "message":"shown on module 16x2 LCD after A+digit"
 #     {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":30}
 #
-# recommended_seconds defaults to DEFAULT_RECOMMENDED_SECONDS until per-user
-# therapy schedules exist. step_minutes defaults to DEFAULT_STEP_MINUTES
-# (module C adds step_minutes; D subtracts).
+# recommended_seconds is last exposure after 44h, 0 if more recent, else
+# initial_seconds. initial / step / max come from the newest complete
+# UserTherapy (EGT or Manual); else DEFAULT_RECOMMENDED_SECONDS (30),
+# DEFAULT_STEP_SECONDS (10), DEFAULT_MAX_SECONDS (1200).
 #
 # ENV:
 #   UDP_DISCOVERY_PORT     (default 3000)
@@ -47,10 +55,12 @@ class UdpDiscoveryListener
   PROTOCOL_VERSION = 1
   DEFAULT_PORT = 3000
   MAX_PACKET = 1500
-  # Temporary default until per-user recommended exposure is stored (30 seconds).
+  # Fallback first-session dose when the user has no therapy assignment (seconds).
   DEFAULT_RECOMMENDED_SECONDS = 30
-  # Increment applied by module keys C (+) and D (−).
-  DEFAULT_STEP_MINUTES = 15
+  # Fallback C/D increment when the user has no therapy assignment (seconds).
+  DEFAULT_STEP_SECONDS = 10
+  # Stock timer maximum (20:00) when no EGT assignment.
+  DEFAULT_MAX_SECONDS = 20 * 60
   # POSIX TZ for ESP setenv; override with UDP_DISCOVERY_TZ_POSIX if needed.
   DEFAULT_TZ_POSIX = "MST7MDT,M3.2.0,M11.1.0"
 
@@ -139,6 +149,10 @@ class UdpDiscoveryListener
       handle_users_request(parsed, remote_ip)
     when :therapy
       handle_therapy_request(parsed, remote_ip)
+    when :therapies
+      handle_therapies_request(parsed, remote_ip)
+    when :assign_therapy
+      handle_assign_therapy(parsed, remote_ip)
     when :exposure
       handle_exposure_log(parsed, remote_ip)
     when :status
@@ -306,23 +320,127 @@ class UdpDiscoveryListener
           user = User.ensure_guest!
         end
         if user
-          {
-            user_id: user.id,
-            name: user.name,
-            recommended_seconds: Exposure.recommended_seconds_for(
-              user,
-              default_seconds: DEFAULT_RECOMMENDED_SECONDS
-            ),
-            step_minutes: DEFAULT_STEP_MINUTES,
-            last_duration_seconds: Exposure.last_duration_seconds_for(user) || 0,
-            message: Exposure.last_session_message_for(user)
-          }
+          therapy_payload_for(user)
         else
           { user_id: user_id, name: nil, recommended_seconds: nil, error: "not_found" }
         end
       end
 
     self.class.build_therapy_reply(**result)
+  end
+
+  def handle_therapies_request(parsed, remote_ip)
+    identity = parsed[:identity]
+    @logger.info(
+      "[udp_discovery] therapies request from #{remote_ip}" \
+      "#{identity ? " identity=#{identity}" : ""}"
+    )
+
+    lists =
+      ActiveRecord::Base.connection_pool.with_connection do
+        if identity.present?
+          Device.upsert_from_discovery!(ip: remote_ip, identity: identity)
+        end
+        {
+          therapies: TherapyType.keypad_list,
+          skin_types: SkinType.keypad_list
+        }
+      end
+
+    self.class.build_therapies_reply(**lists)
+  end
+
+  def handle_assign_therapy(parsed, remote_ip)
+    identity = parsed[:identity]
+    user_id = parsed[:user_id]
+    therapy_id = parsed[:therapy_id]
+    skin_id = parsed[:skin_id]
+    @logger.info(
+      "[udp_discovery] assign_therapy from #{remote_ip}" \
+      "#{identity ? " identity=#{identity}" : ""}" \
+      " user_id=#{user_id.inspect} therapy_id=#{therapy_id.inspect}" \
+      " skin_id=#{skin_id.inspect}"
+    )
+
+    unless user_id.is_a?(Integer) && user_id >= 0
+      return self.class.build_assign_therapy_reply(ok: false, error: "bad_user_id", user_id: user_id)
+    end
+    unless therapy_id.is_a?(Integer) && therapy_id.between?(1, 9)
+      return self.class.build_assign_therapy_reply(
+        ok: false, error: "bad_therapy_id", user_id: user_id, therapy_id: therapy_id
+      )
+    end
+
+    result =
+      ActiveRecord::Base.connection_pool.with_connection do
+        if identity.present?
+          Device.upsert_from_discovery!(ip: remote_ip, identity: identity)
+        end
+        user = User.find_by(id: user_id)
+        if user.nil? && user_id == User::GUEST_ID
+          user = User.ensure_guest!
+        end
+        unless user
+          next { ok: false, error: "not_found", user_id: user_id, therapy_id: therapy_id }
+        end
+
+        therapy_type = TherapyType.find_by_keypad_id(therapy_id)
+        unless therapy_type
+          next { ok: false, error: "not_found", user_id: user.id, therapy_id: therapy_id }
+        end
+
+        skin_type = nil
+        if therapy_type.uses_skin_type?
+          unless skin_id.is_a?(Integer) && skin_id.between?(1, 6)
+            next {
+              ok: false, error: "need_skin", user_id: user.id, therapy_id: therapy_id
+            }
+          end
+          skin_type = SkinType.find_by(number: skin_id)
+          unless skin_type
+            next {
+              ok: false, error: "bad_skin", user_id: user.id,
+              therapy_id: therapy_id, skin_id: skin_id
+            }
+          end
+        end
+
+        assignment = user.user_therapies.find_or_initialize_by(therapy_type: therapy_type)
+        assignment.skin_type = skin_type
+        assignment.updated_at = Time.current
+        unless assignment.save
+          next {
+            ok: false, error: "invalid", user_id: user.id,
+            therapy_id: therapy_id, skin_id: skin_id
+          }
+        end
+
+        {
+          ok: true,
+          user_id: user.id,
+          therapy_id: therapy_id,
+          skin_id: skin_type&.number
+        }
+      end
+
+    self.class.build_assign_therapy_reply(**result)
+  end
+
+  def therapy_payload_for(user)
+    initial = user.therapy_initial_seconds(default: DEFAULT_RECOMMENDED_SECONDS)
+    {
+      user_id: user.id,
+      name: user.name,
+      recommended_seconds: Exposure.recommended_seconds_for(
+        user,
+        default_seconds: initial
+      ),
+      step_seconds: user.therapy_step_seconds(default: DEFAULT_STEP_SECONDS),
+      max_seconds: user.therapy_max_seconds(default: DEFAULT_MAX_SECONDS),
+      initial_seconds: initial,
+      last_duration_seconds: Exposure.last_duration_seconds_for(user) || 0,
+      message: Exposure.last_session_message_for(user)
+    }
   end
 
   # Lamp-off log from session_timer: user, duration, end time (unix).
@@ -436,6 +554,17 @@ class UdpDiscoveryListener
       }
     when "users"
       { type: :users, identity: data["identity"].presence, v: data["v"] }
+    when "therapies"
+      { type: :therapies, identity: data["identity"].presence, v: data["v"] }
+    when "assign_therapy"
+      {
+        type: :assign_therapy,
+        identity: data["identity"].presence,
+        user_id: coerce_user_id(data["user_id"]),
+        therapy_id: coerce_user_id(data["therapy_id"]),
+        skin_id: coerce_user_id(data["skin_id"]),
+        v: data["v"]
+      }
     when "therapy"
       {
         type: :therapy,
@@ -604,6 +733,48 @@ class UdpDiscoveryListener
     }.to_json
   end
 
+  def self.build_therapies_request(identity:)
+    {
+      v: PROTOCOL_VERSION,
+      type: "therapies",
+      identity: identity
+    }.to_json
+  end
+
+  def self.build_therapies_reply(therapies:, skin_types:)
+    {
+      v: PROTOCOL_VERSION,
+      type: "therapies",
+      therapies: therapies,
+      skin_types: skin_types
+    }.to_json
+  end
+
+  def self.build_assign_therapy_request(identity:, user_id:, therapy_id:, skin_id: nil)
+    payload = {
+      v: PROTOCOL_VERSION,
+      type: "assign_therapy",
+      identity: identity,
+      user_id: user_id,
+      therapy_id: therapy_id
+    }
+    payload[:skin_id] = skin_id unless skin_id.nil?
+    payload.to_json
+  end
+
+  def self.build_assign_therapy_reply(ok:, error: nil, user_id: nil, therapy_id: nil, skin_id: nil)
+    payload = {
+      v: PROTOCOL_VERSION,
+      type: "assign_therapy",
+      ok: ok
+    }
+    payload[:error] = error if error.present?
+    payload[:user_id] = user_id unless user_id.nil?
+    payload[:therapy_id] = therapy_id unless therapy_id.nil?
+    payload[:skin_id] = skin_id unless skin_id.nil?
+    payload.to_json
+  end
+
   def self.build_therapy_request(identity:, user_id:)
     {
       v: PROTOCOL_VERSION,
@@ -614,7 +785,8 @@ class UdpDiscoveryListener
   end
 
   def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil, message: nil,
-                               step_minutes: nil, last_duration_seconds: nil)
+                               step_seconds: nil, max_seconds: nil, initial_seconds: nil,
+                               last_duration_seconds: nil)
     payload = {
       v: PROTOCOL_VERSION,
       type: "therapy",
@@ -622,7 +794,9 @@ class UdpDiscoveryListener
     }
     payload[:name] = name if name.present?
     payload[:recommended_seconds] = recommended_seconds unless recommended_seconds.nil?
-    payload[:step_minutes] = step_minutes unless step_minutes.nil?
+    payload[:step_seconds] = step_seconds unless step_seconds.nil?
+    payload[:max_seconds] = max_seconds unless max_seconds.nil?
+    payload[:initial_seconds] = initial_seconds unless initial_seconds.nil?
     payload[:last_duration_seconds] = last_duration_seconds unless last_duration_seconds.nil?
     payload[:error] = error if error.present?
     # Free-text note for the module 16x2 (session_timer shows then returns to entry).

@@ -1,0 +1,41 @@
+# SolRx E-Series UVBNB User's Manual Rev 3.3A (May 2026).
+# Therapy / skin-condition modes from Appendix D EGTs (single E760M),
+# plus Manual for user-entered times with no EGT schedule.
+# Physician instructions always override these labels.
+---
+- slug: manual
+  name: Manual
+  uses_skin_type: false
+  step_seconds: 15
+  max_seconds: 1200
+  initial_seconds: 30
+  description: >-
+    User-entered session times. No EGT schedule or skin-type table.
+    Cap is the stock timer maximum (20:00).
+- slug: psoriasis
+  name: Psoriasis
+  uses_skin_type: true
+  step_seconds:
+  max_seconds:
+  initial_seconds:
+  description: >-
+    EGT selection uses physician-estimated skin type (Table 1).
+    Typical frequency 3 to 5 times per week. Step, max, and initial come from skin type.
+- slug: vitiligo
+  name: Vitiligo
+  uses_skin_type: false
+  step_seconds: 8
+  max_seconds: 100
+  initial_seconds: 50
+  description: >-
+    Skin type is not used; all patients share one schedule.
+    Typical frequency 2 times per week. Listed maximum 1:40. Initial 0:50.
+- slug: atopic_dermatitis
+  name: Atopic dermatitis (eczema)
+  uses_skin_type: false
+  step_seconds: 16
+  max_seconds: 166
+  initial_seconds: 50
+  description: >-
+    Skin type is not used; all patients share one schedule.
+    Typical frequency 2 or 3 times per week. Listed maximum 2:46. Initial 0:50.

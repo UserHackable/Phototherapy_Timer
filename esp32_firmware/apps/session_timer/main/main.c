@@ -12,10 +12,12 @@
  *   - Ping reports app + running git version; logs match vs published OTA
  *   - UDP status: mode, user, lamp/fan, LCD lines, LED text (on display change + ping)
  *   - Key A: user list; digit: therapy recommendation → loads MMSS entry
+ *   - Key B: therapy list; digit selects type; psoriasis then skin type I–VI
  *   - Therapy reply optional "message" → show on 16x2 LCD, then entry UI
- *   - Therapy reply step_minutes (default 15) + last_duration_seconds
- *   - Key C: last exposure + step_minutes; D: last − step (floor 0, cap 99:59)
- *   - Key B / UDP type "ota": check for LAN firmware now (idle only)
+ *   - Therapy reply step_seconds + max_seconds + initial_seconds
+ *   - Key *: restore initial_seconds (30 s until a therapy reply)
+ *   - Key C/D: recommended ± step_seconds; stay 0 if recommended is 0
+ *   - UDP type "ota" (web /devices): check for LAN firmware now (idle only)
  *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
  *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
@@ -84,11 +86,15 @@ static const char *TAG = "session_timer";
 #define DEBOUNCE_MS   30 /* ~2 polls; keep short so flaky I²C still registers */
 #define RELEASE_POLLS 3  /* need a few "up" samples before next key */
 #define MAX_DIGITS    4
-/** Default programmed session: 30 seconds (MMSS entry 30) until user types. */
+/** Default first-session dose (seconds) until a therapy reply supplies initial_seconds. */
+#define DEFAULT_INITIAL_SECONDS  30
+/** Boot / no-therapy MMSS entry matching DEFAULT_INITIAL_SECONDS. */
 #define DEFAULT_ENTRY_MMSS    30
 #define DEFAULT_ENTRY_DIGITS  2
-/** Default C/D increment when therapy reply omits step_minutes. */
-#define DEFAULT_STEP_MINUTES  15
+/** Default C/D increment when therapy reply omits step_seconds. */
+#define DEFAULT_STEP_SECONDS  10
+/** Stock timer maximum (20:00) until a therapy reply supplies max_seconds. */
+#define DEFAULT_MAX_SECONDS   (20 * 60)
 #define MAX_SESSION_SEC       (99 * 60 + 59)
 #define IDLE_TO_CLOCK_MS  (60 * 1000)
 #define WIFI_IP_WAIT_MS   20000
@@ -126,7 +132,9 @@ typedef enum {
     ST_ENTRY = 0,
     ST_RUNNING,
     ST_CLOCK,
-    ST_USERS, /* paged user list from server (key A) */
+    ST_USERS,     /* paged user list from server (key A) */
+    ST_THERAPIES, /* paged therapy types (key B) */
+    ST_SKINS,     /* paged skin types after a therapy that needs one */
 } state_t;
 
 #define LCD_COLS           16
@@ -173,7 +181,7 @@ static int64_t s_last_wifi_try_us;
 static int64_t s_last_discovery_us;
 static int64_t s_last_ota_check_us;
 static bool s_ota_boot_marked;
-/** Set by key B or UDP type "ota"; maybe_ota_check runs on the next idle pass. */
+/** Set by UDP type "ota" (web poke); maybe_ota_check runs on the next idle pass. */
 static volatile bool s_ota_requested;
 static int s_cmd_sock = -1;
 
@@ -202,8 +210,25 @@ static int64_t s_users_page_start_us;
 /** Selected household user after A + digit (0 / empty name = Guest). */
 static int s_selected_user_id;
 static char s_selected_user_name[24];
-/** From last therapy reply: C adds step_minutes, D subtracts. */
-static int s_step_minutes = DEFAULT_STEP_MINUTES;
+
+#define PICK_LIST_MAX 10
+typedef struct {
+    int id;
+    char name[24];
+    bool uses_skin_type;
+} pick_item_t;
+static pick_item_t s_therapies[PICK_LIST_MAX];
+static int s_therapy_count;
+static pick_item_t s_skins[PICK_LIST_MAX];
+static int s_skin_count;
+static int s_pending_therapy_id;
+static char s_pending_therapy_name[24];
+/** From last therapy reply: C/D step recommended; * restores initial. */
+static int s_step_seconds = DEFAULT_STEP_SECONDS;
+static int s_max_seconds = DEFAULT_MAX_SECONDS;
+static int s_initial_seconds = DEFAULT_INITIAL_SECONDS;
+static int s_recommended_seconds;
+static bool s_have_recommended;
 static int s_last_duration_sec;
 static bool s_have_last_duration;
 
@@ -334,6 +359,21 @@ static int entry_to_seconds(int entry)
 }
 
 /** Convert total seconds to MMSS entry digits (e.g. 30 → 30, 90 → 130). */
+static int clamp_session_sec(int sec)
+{
+    int cap = s_max_seconds;
+    if (cap < 1 || cap > MAX_SESSION_SEC) {
+        cap = MAX_SESSION_SEC;
+    }
+    if (sec > cap) {
+        return cap;
+    }
+    if (sec < 0) {
+        return 0;
+    }
+    return sec;
+}
+
 static int seconds_to_entry(int total_sec)
 {
     if (total_sec < 0) {
@@ -909,6 +949,10 @@ static const char *ui_state_name(void)
         return "clock";
     case ST_USERS:
         return "users";
+    case ST_THERAPIES:
+        return "therapies";
+    case ST_SKINS:
+        return "skins";
     default:
         return "entry";
     }
@@ -1192,6 +1236,10 @@ static void discovery_task(void *arg)
 static void ui_entry_refresh(void);
 static void ui_clock_refresh(void);
 static void ui_users_page_paint(void);
+static void ui_therapies_page_paint(void);
+static void enter_therapies_mode(void);
+static void enter_skins_mode(void);
+static void do_therapy_list_key(void);
 
 /** Request users 1–9 from Rails (UDP JSON). Uses known server IP from discovery. */
 static bool request_user_list(void)
@@ -1297,6 +1345,167 @@ static bool request_user_list(void)
     return s_user_count > 0;
 }
 
+/** Send JSON to the discovered server and wait for one datagram. Returns n or -1. */
+static int udp_rpc(cJSON *root, char *rx, size_t rx_cap)
+{
+    if (!root || !rx || rx_cap < 2) {
+        if (root) {
+            cJSON_Delete(root);
+        }
+        return -1;
+    }
+    if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
+        cJSON_Delete(root);
+        return -1;
+    }
+    char *payload = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!payload) {
+        return -1;
+    }
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        free(payload);
+        return -1;
+    }
+    struct timeval tv = {
+        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
+        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
+    };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    struct sockaddr_in dest = {0};
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(DISCOVERY_PORT);
+    if (inet_aton(s_server_ip, &dest.sin_addr) == 0) {
+        ESP_LOGW(TAG, "udp_rpc: bad server ip %s", s_server_ip);
+        close(sock);
+        free(payload);
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "udp → %s:%d %s", s_server_ip, DISCOVERY_PORT, payload);
+    if (sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
+        ESP_LOGW(TAG, "udp sendto errno %d", errno);
+        close(sock);
+        free(payload);
+        return -1;
+    }
+    free(payload);
+
+    struct sockaddr_in src = {0};
+    socklen_t slen = sizeof(src);
+    int n = recvfrom(sock, rx, rx_cap - 1, 0, (struct sockaddr *)&src, &slen);
+    close(sock);
+    if (n < 0) {
+        ESP_LOGW(TAG, "udp_rpc: no reply");
+        return -1;
+    }
+    rx[n] = '\0';
+    ESP_LOGI(TAG, "udp ← %s", rx);
+    return n;
+}
+
+static int parse_pick_array(const cJSON *arr, pick_item_t *out, int cap, bool want_skin_flag)
+{
+    int count = 0;
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, arr) {
+        if (count >= cap) {
+            break;
+        }
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(item, "id");
+        const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
+        if (!cJSON_IsNumber(id) || !cJSON_IsString(name) || !name->valuestring) {
+            continue;
+        }
+        out[count].id = (int)id->valuedouble;
+        strncpy(out[count].name, name->valuestring, sizeof(out[count].name) - 1);
+        out[count].name[sizeof(out[count].name) - 1] = '\0';
+        if (want_skin_flag) {
+            const cJSON *need = cJSON_GetObjectItemCaseSensitive(item, "uses_skin_type");
+            out[count].uses_skin_type = cJSON_IsTrue(need);
+        } else {
+            out[count].uses_skin_type = false;
+        }
+        count++;
+    }
+    return count;
+}
+
+static bool request_therapy_list(void)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return false;
+    }
+    cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(root, "type", "therapies");
+    cJSON_AddStringToObject(root, "identity", s_device_identity);
+
+    char rx[1024];
+    if (udp_rpc(root, rx, sizeof(rx)) < 0) {
+        return false;
+    }
+    cJSON *j = cJSON_Parse(rx);
+    if (!j) {
+        return false;
+    }
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
+    const cJSON *ther = cJSON_GetObjectItemCaseSensitive(j, "therapies");
+    const cJSON *skins = cJSON_GetObjectItemCaseSensitive(j, "skin_types");
+    if (!cJSON_IsString(type) || strcasecmp(type->valuestring, "therapies") != 0 ||
+        !cJSON_IsArray(ther)) {
+        cJSON_Delete(j);
+        return false;
+    }
+    s_therapy_count = parse_pick_array(ther, s_therapies, PICK_LIST_MAX, true);
+    s_skin_count = 0;
+    if (cJSON_IsArray(skins)) {
+        s_skin_count = parse_pick_array(skins, s_skins, PICK_LIST_MAX, false);
+    }
+    cJSON_Delete(j);
+    ESP_LOGI(TAG, "therapies loaded: %d skins: %d", s_therapy_count, s_skin_count);
+    return s_therapy_count > 0;
+}
+
+static bool request_assign_therapy(int user_id, int therapy_id, int skin_id)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        return false;
+    }
+    cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(root, "type", "assign_therapy");
+    cJSON_AddStringToObject(root, "identity", s_device_identity);
+    cJSON_AddNumberToObject(root, "user_id", user_id);
+    cJSON_AddNumberToObject(root, "therapy_id", therapy_id);
+    if (skin_id > 0) {
+        cJSON_AddNumberToObject(root, "skin_id", skin_id);
+    }
+
+    char rx[512];
+    if (udp_rpc(root, rx, sizeof(rx)) < 0) {
+        return false;
+    }
+    cJSON *j = cJSON_Parse(rx);
+    if (!j) {
+        return false;
+    }
+    const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
+    const cJSON *ok = cJSON_GetObjectItemCaseSensitive(j, "ok");
+    const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
+    bool good = cJSON_IsString(type) && type->valuestring &&
+                strcasecmp(type->valuestring, "assign_therapy") == 0 &&
+                cJSON_IsTrue(ok);
+    if (!good && cJSON_IsString(err) && err->valuestring) {
+        ESP_LOGW(TAG, "assign_therapy error: %s", err->valuestring);
+    }
+    cJSON_Delete(j);
+    return good;
+}
+
 /** Find loaded user by server id; returns index or -1. */
 static int find_user_index_by_id(int user_id)
 {
@@ -1311,7 +1520,7 @@ static int find_user_index_by_id(int user_id)
 /**
  * Request recommended exposure for user_id from Rails (UDP therapy).
  * On success sets *out_sec, optional name, and optional message buffers; returns true.
- * Also stores step_minutes and last_duration_seconds for keys C and D.
+ * Also stores recommended / step / max / initial and last_duration for C, D, and *.
  * message_out receives therapy reply "message" when present (may be set on error too).
  */
 static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t name_cap,
@@ -1397,7 +1606,10 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
     const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
     const cJSON *rec = cJSON_GetObjectItemCaseSensitive(j, "recommended_seconds");
-    const cJSON *step = cJSON_GetObjectItemCaseSensitive(j, "step_minutes");
+    const cJSON *step = cJSON_GetObjectItemCaseSensitive(j, "step_seconds");
+    const cJSON *step_min = cJSON_GetObjectItemCaseSensitive(j, "step_minutes");
+    const cJSON *maxj = cJSON_GetObjectItemCaseSensitive(j, "max_seconds");
+    const cJSON *initj = cJSON_GetObjectItemCaseSensitive(j, "initial_seconds");
     const cJSON *last_dur = cJSON_GetObjectItemCaseSensitive(j, "last_duration_seconds");
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
     const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
@@ -1422,6 +1634,8 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     if (sec > MAX_SESSION_SEC) {
         sec = MAX_SESSION_SEC;
     }
+    s_recommended_seconds = sec;
+    s_have_recommended = true;
     if (out_sec) {
         *out_sec = sec;
     }
@@ -1431,13 +1645,38 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     }
 
     if (cJSON_IsNumber(step) && step->valuedouble >= 0) {
-        int step_min = (int)step->valuedouble;
-        if (step_min > 99) {
-            step_min = 99;
+        int step_sec = (int)step->valuedouble;
+        if (step_sec > MAX_SESSION_SEC) {
+            step_sec = MAX_SESSION_SEC;
         }
-        s_step_minutes = step_min;
+        s_step_seconds = step_sec;
+    } else if (cJSON_IsNumber(step_min) && step_min->valuedouble >= 0) {
+        /* Older servers sent minutes. */
+        int step_sec = (int)step_min->valuedouble * 60;
+        if (step_sec > MAX_SESSION_SEC) {
+            step_sec = MAX_SESSION_SEC;
+        }
+        s_step_seconds = step_sec;
     } else {
-        s_step_minutes = DEFAULT_STEP_MINUTES;
+        s_step_seconds = DEFAULT_STEP_SECONDS;
+    }
+    if (cJSON_IsNumber(maxj) && maxj->valuedouble > 0) {
+        int mx = (int)maxj->valuedouble;
+        if (mx > MAX_SESSION_SEC) {
+            mx = MAX_SESSION_SEC;
+        }
+        s_max_seconds = mx;
+    } else {
+        s_max_seconds = DEFAULT_MAX_SECONDS;
+    }
+    if (cJSON_IsNumber(initj) && initj->valuedouble > 0) {
+        int init_sec = (int)initj->valuedouble;
+        if (init_sec > MAX_SESSION_SEC) {
+            init_sec = MAX_SESSION_SEC;
+        }
+        s_initial_seconds = init_sec;
+    } else {
+        s_initial_seconds = DEFAULT_INITIAL_SECONDS;
     }
     if (cJSON_IsNumber(last_dur) && last_dur->valuedouble >= 0) {
         int last_sec = (int)last_dur->valuedouble;
@@ -1551,6 +1790,7 @@ static void apply_therapy_entry(int user_id, const char *name, int sec)
         snprintf(s_selected_user_name, sizeof(s_selected_user_name), "User %d",
                  user_id > 99 ? 99 : (user_id < 0 ? 0 : user_id));
     }
+    sec = clamp_session_sec(sec);
     s_entry = seconds_to_entry(sec);
     s_entry_digits = entry_digit_count(s_entry);
     if (s_entry_digits < 1 && s_entry > 0) {
@@ -1679,40 +1919,164 @@ static void select_user_by_digit(char digit)
     show_therapy_message_if_any(message_buf);
 }
 
-/** C adds step_minutes to last exposure; D subtracts (floor 0). */
+static int find_pick_index_by_id(const pick_item_t *items, int count, int id)
+{
+    for (int i = 0; i < count; i++) {
+        if (items[i].id == id) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void reload_therapy_after_assign(void)
+{
+    int user_id = s_selected_user_id;
+    if (user_id < 0) {
+        user_id = 0;
+    }
+    char name_buf[24];
+    snprintf(name_buf, sizeof(name_buf), "%s", selected_user_label());
+    lcd_status(name_buf, "therapy…");
+    int sec = 0;
+    char reply_name[24];
+    char message_buf[THERAPY_MSG_CAP];
+    if (!request_therapy(user_id, &sec, reply_name, sizeof(reply_name),
+                         message_buf, sizeof(message_buf))) {
+        lcd_status("Therapy fail", name_buf);
+        s_state = ST_ENTRY;
+        note_input();
+        return;
+    }
+    if (reply_name[0] != '\0') {
+        strncpy(name_buf, reply_name, sizeof(name_buf) - 1);
+        name_buf[sizeof(name_buf) - 1] = '\0';
+    }
+    apply_therapy_entry(user_id, name_buf, sec);
+    show_therapy_message_if_any(message_buf);
+}
+
+static void assign_pending_therapy(int skin_id)
+{
+    int user_id = s_selected_user_id;
+    if (user_id < 0) {
+        user_id = 0;
+    }
+    lcd_status(s_pending_therapy_name[0] ? s_pending_therapy_name : "Therapy",
+               "assign…");
+    if (!request_assign_therapy(user_id, s_pending_therapy_id, skin_id)) {
+        lcd_status("Assign fail", "try again");
+        note_input();
+        s_state = ST_THERAPIES;
+        s_users_page_start_us = esp_timer_get_time();
+        vTaskDelay(pdMS_TO_TICKS(800));
+        ui_therapies_page_paint();
+        return;
+    }
+    reload_therapy_after_assign();
+}
+
+static void select_therapy_by_digit(char digit)
+{
+    int id = digit - '0';
+    int idx = find_pick_index_by_id(s_therapies, s_therapy_count, id);
+    if (idx < 0) {
+        lcd_status("Unknown id", "try 1-4");
+        note_input();
+        ESP_LOGW(TAG, "digit %c: therapy_id %d not in list", digit, id);
+        return;
+    }
+    s_pending_therapy_id = s_therapies[idx].id;
+    strncpy(s_pending_therapy_name, s_therapies[idx].name, sizeof(s_pending_therapy_name) - 1);
+    s_pending_therapy_name[sizeof(s_pending_therapy_name) - 1] = '\0';
+    if (s_therapies[idx].uses_skin_type) {
+        if (s_skin_count <= 0) {
+            lcd_status("No skin types", "on server");
+            note_input();
+            return;
+        }
+        enter_skins_mode();
+        return;
+    }
+    assign_pending_therapy(0);
+}
+
+static void select_skin_by_digit(char digit)
+{
+    int id = digit - '0';
+    int idx = find_pick_index_by_id(s_skins, s_skin_count, id);
+    if (idx < 0) {
+        lcd_status("Unknown id", "try 1-6");
+        note_input();
+        ESP_LOGW(TAG, "digit %c: skin_id %d not in list", digit, id);
+        return;
+    }
+    assign_pending_therapy(s_skins[idx].id);
+}
+
+static void do_therapy_list_key(void)
+{
+    note_input();
+    if (!s_have_server || s_server_ip[0] == '\0') {
+        lcd_status("Therapy…", "discover");
+        ESP_LOGI(TAG, "key B: no server — retry discovery");
+        if (s_have_ip) {
+            s_need_discovery = true;
+            run_discovery("key B");
+        }
+    }
+
+    lcd_status("Therapy…", s_have_server ? s_server_ip : "no server");
+    if (request_therapy_list()) {
+        enter_therapies_mode();
+    } else {
+        lcd_status("Therapy fail", s_have_server ? "timeout" : "no server");
+        s_state = ST_ENTRY;
+        note_input();
+    }
+}
+
+/** C adds step_seconds to recommended; D subtracts (floor 0).
+ *  Happy path: server recommended_seconds is last duration. Too soon (0) stays 0.
+ *  Before any therapy reply, fall back to last duration (usually 0). */
 static void apply_last_step(int sign)
 {
-    int last = s_have_last_duration ? s_last_duration_sec : 0;
-    int step = s_step_minutes;
-    if (step < 0) {
-        step = DEFAULT_STEP_MINUTES;
+    int base;
+    if (s_have_recommended) {
+        if (s_recommended_seconds <= 0) {
+            apply_therapy_entry(s_selected_user_id, selected_user_label(), 0);
+            ui_entry_paint_top_keep_bottom();
+            ESP_LOGI(TAG, "%c ignored: recommended 0", sign >= 0 ? 'C' : 'D');
+            return;
+        }
+        base = s_recommended_seconds;
+    } else {
+        base = s_have_last_duration ? s_last_duration_sec : 0;
     }
-    if (step > 99) {
-        step = 99;
+    int step = s_step_seconds;
+    if (step < 0) {
+        step = DEFAULT_STEP_SECONDS;
+    }
+    if (step > MAX_SESSION_SEC) {
+        step = MAX_SESSION_SEC;
     }
     if (sign >= 0) {
         sign = 1;
     } else {
         sign = -1;
     }
-    int sec = last + (sign * step * 60);
-    if (sec > MAX_SESSION_SEC) {
-        sec = MAX_SESSION_SEC;
-    }
-    if (sec < 0) {
-        sec = 0;
-    }
+    int sec = clamp_session_sec(base + (sign * step));
     if (sec < 1 && sign > 0) {
-        lcd_status("Need last+step", "no last time");
+        lcd_status("Need rec+step", "no recommend");
         note_input();
         s_state = ST_ENTRY;
-        ESP_LOGW(TAG, "C ignored: last=%ds step=%d min", last, step);
+        ESP_LOGW(TAG, "C ignored: rec=%ds step=%ds", base, step);
         return;
     }
     apply_therapy_entry(s_selected_user_id, selected_user_label(), sec);
     ui_entry_paint_top_keep_bottom();
-    ESP_LOGI(TAG, "%c: last %ds %c %d min → %ds (entry %d)",
-             sign > 0 ? 'C' : 'D', last, sign > 0 ? '+' : '-', step, sec, s_entry);
+    ESP_LOGI(TAG, "%c: rec %ds %c %ds → %ds (entry %d)",
+             sign > 0 ? 'C' : 'D', base, sign > 0 ? '+' : '-', step, sec, s_entry);
 }
 
 /**
@@ -1821,22 +2185,146 @@ static void enter_users_mode(void)
              s_user_count, s_users_page_count, USERS_MODE_MS / 1000);
 }
 
-static void tick_users_mode(void)
+static void tick_list_mode(void (*paint)(void))
 {
     int64_t now = esp_timer_get_time();
     if (now - s_users_mode_start_us >= (int64_t)USERS_MODE_MS * 1000) {
-        ESP_LOGI(TAG, "users mode timeout → clock");
+        ESP_LOGI(TAG, "list mode timeout → clock");
         enter_clock_mode();
         return;
     }
     if (now - s_users_page_start_us >= (int64_t)USERS_PAGE_MS * 1000) {
         if (s_users_page_count < 1) {
-            recompute_user_pages();
+            s_users_page_count = 1;
+            s_users_page_start[0] = 0;
         }
         s_users_page = (s_users_page + 1) % s_users_page_count;
         s_users_page_start_us = now;
-        ui_users_page_paint();
+        paint();
     }
+}
+
+static void tick_users_mode(void)
+{
+    if (s_users_page_count < 1) {
+        recompute_user_pages();
+    }
+    tick_list_mode(ui_users_page_paint);
+}
+
+static bool format_pick_line(char *line, size_t line_cap, const pick_item_t *items, int count, int idx)
+{
+    if (line_cap < 2) {
+        return false;
+    }
+    line[0] = '\0';
+    if (idx < 0 || idx >= count) {
+        return false;
+    }
+    int id = items[idx].id;
+    if (id < 0) {
+        id = 0;
+    }
+    if (id > 99) {
+        id = id % 100;
+    }
+    int tlen = snprintf(line, line_cap, "%d:%s", id, items[idx].name);
+    if (tlen < 0) {
+        line[0] = '\0';
+        return false;
+    }
+    if ((size_t)tlen > (size_t)LCD_COLS && line_cap > LCD_COLS) {
+        line[LCD_COLS] = '\0';
+    }
+    return true;
+}
+
+static void recompute_pick_pages(int count)
+{
+    s_users_page_count = 0;
+    if (count <= 0) {
+        s_users_page_count = 1;
+        s_users_page_start[0] = 0;
+        return;
+    }
+    for (int i = 0; i < count && s_users_page_count < USERS_PAGE_MAX; i += 2) {
+        s_users_page_start[s_users_page_count++] = i;
+    }
+    if (s_users_page_count < 1) {
+        s_users_page_count = 1;
+        s_users_page_start[0] = 0;
+    }
+}
+
+static void ui_pick_page_paint(const pick_item_t *items, int count, const char *empty_title)
+{
+    if (count <= 0) {
+        lcd_status(empty_title ? empty_title : "List", "none");
+        return;
+    }
+    if (s_users_page >= s_users_page_count) {
+        s_users_page = 0;
+    }
+    int idx = s_users_page_start[s_users_page];
+    char l0[17], l1[17];
+    if (!format_pick_line(l0, sizeof(l0), items, count, idx)) {
+        snprintf(l0, sizeof(l0), "%s", empty_title ? empty_title : "List");
+    }
+    if (!format_pick_line(l1, sizeof(l1), items, count, idx + 1)) {
+        l1[0] = '\0';
+    }
+    lcd_status(l0, l1);
+    show_led_wall_clock();
+}
+
+static void ui_therapies_page_paint(void)
+{
+    ui_pick_page_paint(s_therapies, s_therapy_count, "Therapy");
+}
+
+static void ui_skins_page_paint(void)
+{
+    ui_pick_page_paint(s_skins, s_skin_count, "Skin type");
+}
+
+static void enter_therapies_mode(void)
+{
+    recompute_pick_pages(s_therapy_count);
+    s_state = ST_THERAPIES;
+    s_users_page = 0;
+    s_users_mode_start_us = esp_timer_get_time();
+    s_users_page_start_us = s_users_mode_start_us;
+    note_input();
+    ui_therapies_page_paint();
+    ESP_LOGI(TAG, "therapies mode: %d types", s_therapy_count);
+}
+
+static void enter_skins_mode(void)
+{
+    recompute_pick_pages(s_skin_count);
+    s_state = ST_SKINS;
+    s_users_page = 0;
+    s_users_mode_start_us = esp_timer_get_time();
+    s_users_page_start_us = s_users_mode_start_us;
+    note_input();
+    ui_skins_page_paint();
+    ESP_LOGI(TAG, "skins mode after %s: %d types", s_pending_therapy_name, s_skin_count);
+}
+
+static void tick_therapies_mode(void)
+{
+    if (s_users_page_count < 1) {
+        recompute_pick_pages(s_therapy_count);
+    }
+    tick_list_mode(ui_therapies_page_paint);
+}
+
+static void tick_skins_mode(void)
+{
+    if (s_users_page_count < 1) {
+        recompute_pick_pages(s_skin_count);
+    }
+    tick_list_mode(ui_skins_page_paint);
 }
 
 /** Key A: ensure discovery, fetch users, enter paging display. */
@@ -1891,14 +2379,14 @@ static void network_maintenance(void)
 
 /**
  * OTA safety gate: never flash while a UV session is running.
- * Also skip while paging users (short interactive UI).
+ * Also skip while paging users / therapies / skins (short interactive UI).
  */
 static bool ota_may_start(void)
 {
     if (s_state == ST_RUNNING) {
         return false;
     }
-    if (s_state == ST_USERS) {
+    if (s_state == ST_USERS || s_state == ST_THERAPIES || s_state == ST_SKINS) {
         return false;
     }
     return true;
@@ -1913,7 +2401,7 @@ static void request_ota_check(const char *reason)
         lcd_status("Update after", "session");
         return;
     }
-    if (s_state == ST_USERS) {
+    if (s_state == ST_USERS || s_state == ST_THERAPIES || s_state == ST_SKINS) {
         s_state = ST_ENTRY;
         note_input();
     }
@@ -2144,9 +2632,16 @@ static void enter_entry_mode(void)
 
 static void clear_entry(void)
 {
-    /* * restores the 30-second default (not zero); keep selected user. */
-    s_entry = DEFAULT_ENTRY_MMSS;
-    s_entry_digits = DEFAULT_ENTRY_DIGITS;
+    /* * restores the last therapy initial dose (30 s until a reply); keep user. */
+    int sec = clamp_session_sec(s_initial_seconds);
+    s_entry = seconds_to_entry(sec);
+    s_entry_digits = entry_digit_count(s_entry);
+    if (s_entry_digits < 1 && s_entry > 0) {
+        s_entry_digits = 1;
+    }
+    if (s_entry_digits < 1) {
+        s_entry_digits = DEFAULT_ENTRY_DIGITS;
+    }
     s_entry_fresh = true;
     s_after_complete = false;
     s_have_last_session_bottom = false;
@@ -2156,6 +2651,13 @@ static void clear_entry(void)
 static void start_session(void)
 {
     int total = entry_to_seconds(s_entry);
+    int capped = clamp_session_sec(total);
+    if (capped < total) {
+        ESP_LOGW(TAG, "start capped %ds → %ds (max)", total, capped);
+        total = capped;
+        s_entry = seconds_to_entry(total);
+        lcd_status("Capped at max", selected_user_label());
+    }
     if (total <= 0) {
         lcd_status("Need time > 0", "digits then #");
         ESP_LOGW(TAG, "start ignored: zero");
@@ -2229,10 +2731,14 @@ static void abort_to_entry(void)
 
 static void on_key(char k)
 {
-    /* Users paging: digit selects user (therapy); A refreshes; other keys leave. */
+    /* Users paging: digit selects user (therapy); A refreshes; B → therapy list. */
     if (s_state == ST_USERS) {
         if (k == 'A') {
             do_user_list_key();
+            return;
+        }
+        if (k == 'B') {
+            do_therapy_list_key();
             return;
         }
         if (k >= '0' && k <= '9') {
@@ -2249,8 +2755,58 @@ static void on_key(char k)
             apply_last_step(-1);
             return;
         }
+        /* Fall through for * / # */
+    }
+
+    /* Therapy paging: digit selects type; B refreshes; A → users. */
+    if (s_state == ST_THERAPIES) {
         if (k == 'B') {
-            request_ota_check("key B");
+            do_therapy_list_key();
+            return;
+        }
+        if (k == 'A') {
+            do_user_list_key();
+            return;
+        }
+        if (k >= '0' && k <= '9') {
+            select_therapy_by_digit(k);
+            return;
+        }
+        s_state = ST_ENTRY;
+        note_input();
+        if (k == 'C') {
+            apply_last_step(1);
+            return;
+        }
+        if (k == 'D') {
+            apply_last_step(-1);
+            return;
+        }
+        /* Fall through for * / # */
+    }
+
+    /* Skin paging: digit selects type; B back to therapies. */
+    if (s_state == ST_SKINS) {
+        if (k == 'B') {
+            enter_therapies_mode();
+            return;
+        }
+        if (k == 'A') {
+            do_user_list_key();
+            return;
+        }
+        if (k >= '0' && k <= '9') {
+            select_skin_by_digit(k);
+            return;
+        }
+        s_state = ST_ENTRY;
+        note_input();
+        if (k == 'C') {
+            apply_last_step(1);
+            return;
+        }
+        if (k == 'D') {
+            apply_last_step(-1);
             return;
         }
         /* Fall through for * / # */
@@ -2273,7 +2829,7 @@ static void on_key(char k)
             return;
         }
         if (k == 'B') {
-            request_ota_check("key B");
+            do_therapy_list_key();
             return;
         }
         /* Fall through to process * # digit as entry keys */
@@ -2326,7 +2882,7 @@ static void on_key(char k)
         return;
     }
     if (k == 'B') {
-        request_ota_check("key B");
+        do_therapy_list_key();
         return;
     }
 }
@@ -2354,7 +2910,8 @@ static void tick_running(void)
 
 static void tick_idle_to_clock(void)
 {
-    if (s_state == ST_RUNNING || s_state == ST_CLOCK || s_state == ST_USERS) {
+    if (s_state == ST_RUNNING || s_state == ST_CLOCK || s_state == ST_USERS ||
+        s_state == ST_THERAPIES || s_state == ST_SKINS) {
         return;
     }
     int64_t idle_us = esp_timer_get_time() - s_last_input_us;
@@ -2542,6 +3099,10 @@ void app_main(void)
             tick_running();
         } else if (s_state == ST_USERS) {
             tick_users_mode();
+        } else if (s_state == ST_THERAPIES) {
+            tick_therapies_mode();
+        } else if (s_state == ST_SKINS) {
+            tick_skins_mode();
         } else if (s_state == ST_CLOCK) {
             int64_t now = esp_timer_get_time();
             /* 1 s LCD/LED refresh — avoid flooding I²C under Wi‑Fi */

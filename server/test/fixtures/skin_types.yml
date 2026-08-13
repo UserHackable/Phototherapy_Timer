@@ -1,0 +1,17 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  number: 1
+  roman: I
+  step_seconds: 16
+  max_seconds: 333
+  initial_seconds: 50
+  description: Always burns, never tans
+
+three:
+  number: 3
+  roman: III
+  step_seconds: 20
+  max_seconds: 500
+  initial_seconds: 83
+  description: Sometimes burns, always tans

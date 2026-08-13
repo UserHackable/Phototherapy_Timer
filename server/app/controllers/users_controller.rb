@@ -8,7 +8,10 @@ class UsersController < ApplicationController
 
   # GET /users/:id
   def show
+    @user_therapies = @user.user_therapies.includes(:therapy_type, :skin_type).newest_first
+    @user_therapy = @user.user_therapies.new
   end
+
 
   private
     def set_user

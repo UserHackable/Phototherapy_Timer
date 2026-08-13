@@ -16,12 +16,15 @@ stay aligned.
 
 | Item | Value |
 |------|--------|
-| Default session entry | **30 seconds** (`00:30`); `*` restores this |
-| Therapy recommendation | **30 seconds** until per-user schedules exist |
+| Default session entry | `initial_seconds` (EGT listed initial; Manual / none **30 s**); `*` restores this |
+| Therapy recommendation | Last exposure after 44h, **0** if more recent, else `initial_seconds` |
 | User list | Household **1–9**, then **0:Guest** |
 | Select user | **A** then digit **0–9** |
-| Step-up (C) | Last exposure + **15 minutes** (`step_minutes` from therapy reply) |
-| Step-down (D) | Last exposure − **15 minutes** (floors at **0:00**) |
+| Select therapy | **B** then digit **1–4** (Manual / Psoriasis / Vitiligo / Eczema); psoriasis then skin **1–6** |
+| Initial dose | `initial_seconds` from assignment (EGT listed initial; Manual / none **30 s**) |
+| Step-up (C) | `recommended_seconds` + `step_seconds` (**10 s** if no therapy, **15 s** Manual, else EGT). Stays **0** if recommended is 0 |
+| Max exposure | `max_seconds` from assignment (EGT listed max; Manual / none **20:00**) |
+| Step-down (D) | `recommended_seconds` − `step_seconds` (floors at **0:00**). Stays **0** if recommended is 0 |
 | LCD entry / run / clock top | Name left, duration right (`Guest` if none) |
 | LCD clock bottom | Calendar date |
 | TM1637 clock mode | Wall clock HH:MM |
@@ -29,7 +32,7 @@ stay aligned.
 | Fan SSR | **GPIO27** — on with lamp, **30 s** after lamp off |
 | Exposure log | UDP on lamp off → `/users/:id/exposures` |
 | Status report | UDP `status` + ping: mode, LCD 2×16, LED, lamp/fan → `/devices` |
-| OTA now | Key **B** or `/devices` **Check for update** (UDP `type:ota`) |
+| OTA now | `/devices` **Check for update** (UDP `type:ota`) |
 
 Protocol detail: [device-discovery.md](../device-discovery.md).  
 Wiring: [wiring.md](../wiring.md).  

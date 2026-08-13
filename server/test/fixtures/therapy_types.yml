@@ -1,0 +1,25 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+manual:
+  slug: manual
+  name: Manual
+  uses_skin_type: false
+  step_seconds: 15
+  max_seconds: 1200
+  initial_seconds: 30
+  description: User-entered session times. No EGT schedule.
+
+psoriasis:
+  slug: psoriasis
+  name: Psoriasis
+  uses_skin_type: true
+  description: EGT uses physician-estimated skin type (Table 1).
+
+eczema:
+  slug: atopic_dermatitis
+  name: Atopic dermatitis (eczema)
+  uses_skin_type: false
+  step_seconds: 16
+  max_seconds: 166
+  initial_seconds: 50
+  description: Skin type is not used.

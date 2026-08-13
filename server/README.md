@@ -57,7 +57,7 @@ Sign in: `/session/new` (then devices index).
 | **Guest** | `guest@ferney.org` | **id 0** — key **A** then **0**; last on list |
 | rob … miriam | `<name>@ferney.org` | household; key **A** then **1–9** |
 
-Source: [`db/data/users.yaml`](db/data/users.yaml) (household only; Guest is always ensured in seeds).
+Source: [`db/data/users.yaml`](db/data/users.yaml) via **data_imp** (`UsersImporter`, upsert by email). Guest is always ensured in seeds. Re-seed updates names and does not reset passwords.
 
 ```bash
 bin/rails db:seed
@@ -65,6 +65,14 @@ bin/rails db:seed
 ```
 
 Default seed password **`password`** (local/dev). Re-seed does not reset existing passwords.
+
+### Seed skin types
+
+Manual Table 1 (I–VI). Source: [`db/data/skin_types.yml`](db/data/skin_types.yml), loaded by **data_imp** (`SkinTypesImporter`, upsert by number). Re-seed updates descriptions and EGT durations (step / max / initial); it does not wipe or duplicate. Used for psoriasis EGT; not required for vitiligo or eczema.
+
+### Seed therapy types
+
+EGT skin-condition modes (psoriasis, vitiligo, atopic dermatitis) plus **Manual** (user-entered times, no skin type). Source: [`db/data/therapy_types.yml`](db/data/therapy_types.yml), loaded by **data_imp** (`TherapyTypesImporter`, upsert by slug). Re-seed updates names, descriptions, and durations; it does not wipe or duplicate. Psoriasis step / max / initial live on the skin type.
 
 ## Web routes (login required)
 
@@ -74,6 +82,7 @@ Default seed password **`password`** (local/dev). Re-seed does not reset existin
 | `/users` | Household + Guest |
 | `/users/:id` | User detail |
 | `/users/:user_id/exposures` | Exposure log (e.g. `/users/4/exposures`, `/users/0/exposures`) |
+| `/users/:user_id/user_therapies` | Assign/remove therapy types (skin type on the join) |
 | `/users/:user_id/exposures/new` | Manual exposure entry |
 
 ## Exposure model
@@ -94,7 +103,9 @@ Full wire format: [docs/device-discovery.md](../docs/device-discovery.md).
 | `status` | ESP → server | UI snapshot (mode, LCD lines, LED, lamp/fan); stored on Device; no reply |
 | `ota` | web → server → ESP | Immediate firmware check (`POST /devices/:id/ota_check` or key **B**) |
 | `users` | ESP ↔ server | Key **A**: household ids 1–9, then **Guest id 0** |
-| `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds` (default **30**), `step_minutes` (default **15**), `last_duration_seconds`; optional `message` → module 16x2 |
+| `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds`, `step_seconds`, `max_seconds`, `initial_seconds`, `last_duration_seconds`; optional `message` |
+| `therapies` | ESP ↔ server | Key **B**: keypad therapy list + skin types |
+| `assign_therapy` | ESP ↔ server | Key **B** then digit(s): assign therapy / skin to the selected user |
 | `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix` |
 
 ### ENV
