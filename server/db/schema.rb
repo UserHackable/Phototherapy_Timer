@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_13_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_13_060000) do
   create_table "devices", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "firmware_app"
@@ -27,9 +27,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_050000) do
   create_table "exposures", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "duration_seconds", null: false
+    t.integer "skin_type_id"
     t.datetime "started_at", null: false
+    t.integer "therapy_type_id"
     t.datetime "updated_at", null: false
     t.integer "user_id", null: false
+    t.index ["skin_type_id"], name: "index_exposures_on_skin_type_id"
+    t.index ["therapy_type_id"], name: "index_exposures_on_therapy_type_id"
     t.index ["user_id", "started_at"], name: "index_exposures_on_user_id_and_started_at"
     t.index ["user_id"], name: "index_exposures_on_user_id"
   end
@@ -91,6 +95,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_050000) do
     t.index ["name"], name: "index_users_on_name"
   end
 
+  add_foreign_key "exposures", "skin_types"
+  add_foreign_key "exposures", "therapy_types"
   add_foreign_key "exposures", "users"
   add_foreign_key "sessions", "users"
   add_foreign_key "user_therapies", "skin_types"

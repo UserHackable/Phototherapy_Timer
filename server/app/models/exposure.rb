@@ -1,5 +1,7 @@
 class Exposure < ApplicationRecord
   belongs_to :user
+  belongs_to :therapy_type, optional: true
+  belongs_to :skin_type, optional: true
 
   # If last session is this old or older, recommend its duration; else recommend 0.
   THERAPY_REUSE_AFTER = 44.hours
@@ -21,6 +23,16 @@ class Exposure < ApplicationRecord
 
     mm, ss = duration_seconds.divmod(60)
     format("%d:%02d", mm, ss)
+  end
+
+  def therapy_label
+    return if therapy_type.blank?
+
+    if skin_type
+      "#{therapy_type.keypad_label} — #{skin_type.label}"
+    else
+      therapy_type.keypad_label
+    end
   end
 
   def now

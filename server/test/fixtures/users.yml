@@ -9,3 +9,13 @@ two:
   name: two
   email_address: two@example.com
   password_digest: <%= password_digest %>
+
+unassigned:
+  name: unassigned
+  email_address: unassigned@example.com
+  password_digest: <%= password_digest %>
+
+fresh:
+  name: fresh
+  email_address: fresh@example.com
+  password_digest: <%= password_digest %>

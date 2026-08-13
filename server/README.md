@@ -103,10 +103,10 @@ Full wire format: [docs/device-discovery.md](../docs/device-discovery.md).
 | `status` | ESP → server | UI snapshot (mode, LCD lines, LED, lamp/fan); stored on Device; no reply |
 | `ota` | web → server → ESP | Immediate firmware check (`POST /devices/:id/ota_check` or key **B**) |
 | `users` | ESP ↔ server | Key **A**: household ids 1–9, then **Guest id 0** |
-| `therapy` | ESP ↔ server | Key **A** then digit: `recommended_seconds`, `step_seconds`, `max_seconds`, `initial_seconds`, `last_duration_seconds`; optional `message` |
+| `therapy` | ESP ↔ server | Key **A** then digit: times plus `therapy_id` / `skin_id` for the current assignment; optional `message` |
 | `therapies` | ESP ↔ server | Key **B**: keypad therapy list + skin types |
 | `assign_therapy` | ESP ↔ server | Key **B** then digit(s): assign therapy / skin to the selected user |
-| `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix` |
+| `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix`, optional `therapy_id` / `skin_id` |
 
 ### ENV
 

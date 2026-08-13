@@ -30,7 +30,7 @@ class UserTest < ActiveSupport::TestCase
   end
 
   test "ensure_guest creates id 0" do
-    User.where(id: 0).delete_all
+    assert_nil User.find_by(id: 0)
     guest = User.ensure_guest!(password: "password")
     assert_equal 0, guest.id
     assert_equal "Guest", guest.name

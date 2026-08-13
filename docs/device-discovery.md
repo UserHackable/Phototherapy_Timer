@@ -68,11 +68,12 @@ UTF-8 JSON objects (single datagram, no framing):
 // Happy path: recommended_seconds is last duration. If recommended is 0, C and D stay at 0.
 {"v":1,"type":"therapy","user_id":4,"name":"miriam","recommended_seconds":50,
  "step_seconds":16,"max_seconds":333,"initial_seconds":50,
- "last_duration_seconds":90,
+ "last_duration_seconds":90,"therapy_id":2,"skin_id":1,
  "message":"Last session\n1:30 0d9h44m ago"}
 
 // ESP → server when the lamp turns off (complete or abort with ≥1 s on)
-{"v":1,"type":"exposure","identity":"esp32-…","user_id":0,"duration_seconds":28,"unix":1721830496}
+{"v":1,"type":"exposure","identity":"esp32-…","user_id":0,"duration_seconds":28,
+ "unix":1721830496,"therapy_id":2,"skin_id":1}
 
 // Server → ESP
 {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":28,"started_at":"…"}
@@ -97,8 +98,8 @@ UTF-8 JSON objects (single datagram, no framing):
 | `users` | users reply | Household ids 1–9, then **`{id:0,name:"Guest"}` last** |
 | `therapies` | therapies reply | Keypad **1–4**: Manual, Psoriasis, Vitiligo, Eczema; `uses_skin_type` for psoriasis |
 | `skin_types` | therapies reply | Keypad **1–6** (Table 1 I–VI) |
-| `therapy_id` | assign_therapy | Key **B** digit **1–4** |
-| `skin_id` | assign_therapy | Skin digit **1–6** when the therapy needs a skin type |
+| `therapy_id` | assign / therapy / exposure | Keypad **1–4** (Manual / Psoriasis / Vitiligo / Eczema). Therapy reply is the user's current assignment; lamp-off log stores it on the Exposure |
+| `skin_id` | assign / therapy / exposure | Skin keypad **1–6** when the therapy uses a skin type |
 | `user_id` | therapy / assign / exposure | Key digit **0–9** (0 = Guest) |
 | `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry. Last exposure after 44h, **0** if more recent, else `initial_seconds` |
 | `step_seconds` | therapy reply | Increment for keys **C** / **D** against `recommended_seconds`. From the user's newest therapy assignment (EGT / Manual **15**), else **10** |

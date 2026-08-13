@@ -36,7 +36,7 @@ require "socket"
 #     {"v":1,"type":"assign_therapy","ok":true,"user_id":4,"therapy_id":2,"skin_id":1}
 #     {"v":1,"type":"therapy","user_id":4,"name":"rob","recommended_seconds":50,
 #      "step_seconds":16,"max_seconds":333,"initial_seconds":50,
-#      "last_duration_seconds":90}
+#      "last_duration_seconds":90,"therapy_id":2,"skin_id":1}
 #     # optional: "message":"shown on module 16x2 LCD after A+digit"
 #     {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":30}
 #
@@ -428,6 +428,7 @@ class UdpDiscoveryListener
 
   def therapy_payload_for(user)
     initial = user.therapy_initial_seconds(default: DEFAULT_RECOMMENDED_SECONDS)
+    assignment = user.current_assignment
     {
       user_id: user.id,
       name: user.name,
@@ -439,6 +440,8 @@ class UdpDiscoveryListener
       max_seconds: user.therapy_max_seconds(default: DEFAULT_MAX_SECONDS),
       initial_seconds: initial,
       last_duration_seconds: Exposure.last_duration_seconds_for(user) || 0,
+      therapy_id: assignment&.therapy_type&.keypad_id,
+      skin_id: assignment&.skin_type&.number,
       message: Exposure.last_session_message_for(user)
     }
   end
@@ -449,10 +452,13 @@ class UdpDiscoveryListener
     user_id = parsed[:user_id]
     duration = parsed[:duration_seconds]
     unix = parsed[:unix]
+    therapy_id = parsed[:therapy_id]
+    skin_id = parsed[:skin_id]
     @logger.info(
       "[udp_discovery] exposure log from #{remote_ip}" \
       "#{identity ? " identity=#{identity}" : ""}" \
-      " user_id=#{user_id.inspect} duration=#{duration.inspect} unix=#{unix.inspect}"
+      " user_id=#{user_id.inspect} duration=#{duration.inspect} unix=#{unix.inspect}" \
+      " therapy_id=#{therapy_id.inspect} skin_id=#{skin_id.inspect}"
     )
 
     unless user_id.is_a?(Integer) && user_id >= 0
@@ -485,14 +491,18 @@ class UdpDiscoveryListener
             Time.current
           end
         started_at = ended_at - duration.seconds
+        therapy_type, skin_type = resolve_exposure_therapy(user, therapy_id, skin_id)
 
         exposure = user.exposures.create!(
           started_at: started_at,
-          duration_seconds: duration
+          duration_seconds: duration,
+          therapy_type: therapy_type,
+          skin_type: skin_type
         )
         @logger.info(
           "[udp_discovery] Exposure##{exposure.id} user=#{user.id}(#{user.name}) " \
-          "duration=#{duration}s started_at=#{started_at.iso8601}"
+          "duration=#{duration}s started_at=#{started_at.iso8601}" \
+          " therapy=#{therapy_type&.slug} skin=#{skin_type&.roman}"
         )
         {
           ok: true,
@@ -504,6 +514,19 @@ class UdpDiscoveryListener
       end
 
     self.class.build_exposure_reply(**result)
+  end
+
+  # Keypad therapy_id / skin_id from the module. If omitted, use the user's
+  # newest assignment so a session still records the active therapy.
+  def resolve_exposure_therapy(user, therapy_id, skin_id)
+    therapy_type = TherapyType.find_by_keypad_id(therapy_id) if therapy_id.is_a?(Integer)
+    skin_type = SkinType.find_by(number: skin_id) if skin_id.is_a?(Integer)
+    if therapy_type.nil?
+      assignment = user.current_assignment
+      return [ assignment&.therapy_type, assignment&.skin_type ]
+    end
+
+    [ therapy_type, skin_type ]
   end
 
   def self.parse_message(text)
@@ -579,6 +602,8 @@ class UdpDiscoveryListener
         user_id: coerce_user_id(data["user_id"]),
         duration_seconds: coerce_nonneg_int(data["duration_seconds"]),
         unix: coerce_nonneg_int(data["unix"]),
+        therapy_id: coerce_user_id(data["therapy_id"]),
+        skin_id: coerce_user_id(data["skin_id"]),
         v: data["v"]
       }
     when "pong"
@@ -786,7 +811,7 @@ class UdpDiscoveryListener
 
   def self.build_therapy_reply(user_id:, name:, recommended_seconds:, error: nil, message: nil,
                                step_seconds: nil, max_seconds: nil, initial_seconds: nil,
-                               last_duration_seconds: nil)
+                               last_duration_seconds: nil, therapy_id: nil, skin_id: nil)
     payload = {
       v: PROTOCOL_VERSION,
       type: "therapy",
@@ -798,21 +823,27 @@ class UdpDiscoveryListener
     payload[:max_seconds] = max_seconds unless max_seconds.nil?
     payload[:initial_seconds] = initial_seconds unless initial_seconds.nil?
     payload[:last_duration_seconds] = last_duration_seconds unless last_duration_seconds.nil?
+    payload[:therapy_id] = therapy_id unless therapy_id.nil?
+    payload[:skin_id] = skin_id unless skin_id.nil?
     payload[:error] = error if error.present?
     # Free-text note for the module 16x2 (session_timer shows then returns to entry).
     payload[:message] = message if message.present?
     payload.to_json
   end
 
-  def self.build_exposure_request(identity:, user_id:, duration_seconds:, unix:)
-    {
+  def self.build_exposure_request(identity:, user_id:, duration_seconds:, unix:,
+                                  therapy_id: nil, skin_id: nil)
+    payload = {
       v: PROTOCOL_VERSION,
       type: "exposure",
       identity: identity,
       user_id: user_id,
       duration_seconds: duration_seconds,
       unix: unix
-    }.to_json
+    }
+    payload[:therapy_id] = therapy_id unless therapy_id.nil?
+    payload[:skin_id] = skin_id unless skin_id.nil?
+    payload.to_json
   end
 
   def self.build_exposure_reply(ok:, error: nil, id: nil, user_id: nil, duration_seconds: nil, started_at: nil)

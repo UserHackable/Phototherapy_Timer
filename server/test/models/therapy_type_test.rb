@@ -29,8 +29,6 @@ class TherapyTypeTest < ActiveSupport::TestCase
   end
 
   test "data_imp loads EGT therapy types from therapy_types.yml" do
-    UserTherapy.delete_all
-    TherapyType.delete_all
     DataImp.import "therapy_types.yml"
     loaded = TherapyType.ordered.to_a
     assert_equal 4, loaded.size

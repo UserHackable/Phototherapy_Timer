@@ -9,6 +9,7 @@ class TherapyType < ApplicationRecord
 
   has_many :user_therapies, dependent: :restrict_with_error
   has_many :users, through: :user_therapies
+  has_many :exposures, dependent: :restrict_with_error
 
   validates :slug, presence: true, uniqueness: true
   validates :name, presence: true

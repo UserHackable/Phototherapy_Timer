@@ -10,8 +10,8 @@
 
 Feature: Per-user UV exposure log
   As a household admin
-  I want each phototherapy run recorded against a user with start time and light-on duration
-  So that we can review who was treated, when, and for how long
+  I want each phototherapy run recorded against a user with start time, light-on duration, and therapy
+  So that we can review who was treated, when, for how long, and with which mode
 
   Background:
     Given the Rails server is running
@@ -44,13 +44,18 @@ Feature: Per-user UV exposure log
     Given user 4 has two exposures
     When I visit "/users/4/exposures"
     Then I see those exposures newest first
-    And each row shows started time, duration, and ended time
+    And each row shows started time, therapy, duration, and ended time
 
   Scenario: Show a single exposure
     Given user 4 has an exposure with id 12
     When I visit "/users/4/exposures/12"
-    Then I see started_at, duration, and ended_at for that exposure
+    Then I see started_at, duration, ended_at, and therapy for that exposure
     And the page names the owning user
+
+  Scenario: Module lamp-off log stores the selected therapy
+    Given user 4's last therapy reply included therapy_id 2 and skin_id 1
+    When the ESP sends type exposure with those keypad ids
+    Then the Exposure belongs to Psoriasis and Type I
 
   Scenario: Create exposure under a user
     Given I am on "/users/4/exposures/new"

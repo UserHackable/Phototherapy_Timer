@@ -15,6 +15,11 @@
   </div>
 
   <div>
+    <strong>Therapy:</strong>
+    <%= exposure.therapy_label.presence || "—" %>
+  </div>
+
+  <div>
     <strong>Ended at:</strong>
     <%= l(exposure.ended_at, format: :long) if exposure.ended_at %>
   </div>

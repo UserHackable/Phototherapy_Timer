@@ -25,8 +25,6 @@ class SkinTypeTest < ActiveSupport::TestCase
   end
 
   test "data_imp loads Table 1 from skin_types.yml" do
-    UserTherapy.delete_all
-    SkinType.delete_all
     DataImp.import "skin_types.yml"
     loaded = SkinType.ordered.to_a
     assert_equal 6, loaded.size

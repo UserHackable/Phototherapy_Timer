@@ -1,5 +1,6 @@
 class SkinType < ApplicationRecord
   has_many :user_therapies, dependent: :restrict_with_error
+  has_many :exposures, dependent: :restrict_with_error
 
   validates :number, presence: true, uniqueness: true,
                      numericality: { only_integer: true, in: 1..6 }

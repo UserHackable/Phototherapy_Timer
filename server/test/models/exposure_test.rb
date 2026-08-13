@@ -37,6 +37,13 @@ class ExposureTest < ActiveSupport::TestCase
     assert_equal "1:35", exposure.duration_mmss
   end
 
+  test "therapy_label includes skin type when present" do
+    exposure = Exposure.new(therapy_type: therapy_types(:psoriasis), skin_type: skin_types(:one))
+    assert_equal "Psoriasis — Type I", exposure.therapy_label
+    assert_equal "Eczema", Exposure.new(therapy_type: therapy_types(:eczema)).therapy_label
+    assert_nil Exposure.new.therapy_label
+  end
+
   test "newest_first orders by started_at descending" do
     base = Time.zone.parse("2026-01-01 12:00:00")
     older = Exposure.create!(user: users(:one), started_at: base, duration_seconds: 30)
@@ -88,29 +95,35 @@ class ExposureTest < ActiveSupport::TestCase
     end
   end
 
-  test "recommended_seconds_for uses last duration only after 44 hours" do
+  test "recommended_seconds_for uses default when user has no exposures" do
+    assert_equal 30, Exposure.recommended_seconds_for(users(:fresh), default_seconds: 30)
+  end
+
+  test "recommended_seconds_for is zero when last exposure is recent" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      user = users(:one)
-      Exposure.where(user_id: user.id).delete_all
-      assert_equal 30, Exposure.recommended_seconds_for(user, default_seconds: 30)
+      Exposure.create!(user: users(:fresh), started_at: 10.hours.ago, duration_seconds: 105)
+      assert_equal 0, Exposure.recommended_seconds_for(users(:fresh), default_seconds: 30)
+    end
+  end
 
-      Exposure.create!(user: user, started_at: 10.hours.ago, duration_seconds: 105)
-      assert_equal 0, Exposure.recommended_seconds_for(user, default_seconds: 30)
-
-      Exposure.where(user_id: user.id).delete_all
+  test "recommended_seconds_for uses last duration after 44 hours" do
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      user = users(:fresh)
       Exposure.create!(user: user, started_at: (44.hours + 1.minute).ago, duration_seconds: 105)
       assert_equal 105, Exposure.recommended_seconds_for(user, default_seconds: 30)
+    end
+  end
 
-      Exposure.where(user_id: user.id).delete_all
-      Exposure.create!(user: user, started_at: 50.hours.ago, duration_seconds: 90)
-      assert_equal 90, Exposure.recommended_seconds_for(user, default_seconds: 30)
+  test "recommended_seconds_for uses last duration after 50 hours" do
+    travel_to Time.zone.parse("2026-08-10 12:00:00") do
+      Exposure.create!(user: users(:fresh), started_at: 50.hours.ago, duration_seconds: 90)
+      assert_equal 90, Exposure.recommended_seconds_for(users(:fresh), default_seconds: 30)
     end
   end
 
   test "last_duration_seconds_for returns newest exposure duration" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      user = users(:one)
-      Exposure.where(user_id: user.id).delete_all
+      user = users(:fresh)
       assert_nil Exposure.last_duration_seconds_for(user)
       assert_nil Exposure.last_duration_seconds_for(nil)
 
@@ -122,8 +135,7 @@ class ExposureTest < ActiveSupport::TestCase
 
   test "last_session_message_for is two LCD lines" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      user = users(:one)
-      Exposure.where(user_id: user.id).delete_all
+      user = users(:fresh)
       assert_equal "No prior session", Exposure.last_session_message_for(user)
 
       Exposure.create!(user: user, started_at: (10.hours + 8.minutes).ago, duration_seconds: 105)

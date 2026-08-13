@@ -18,7 +18,7 @@
  *   - Key *: restore initial_seconds (30 s until a therapy reply)
  *   - Key C/D: recommended ± step_seconds; stay 0 if recommended is 0
  *   - UDP type "ota" (web /devices): check for LAN firmware now (idle only)
- *   - Lamp off → UDP exposure log (user_id, duration, unix); Guest = id 0
+ *   - Lamp off → UDP exposure log (user, duration, unix, therapy_id, skin_id)
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
  *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
  *   - SNTP public pools only if discovery does not supply time
@@ -163,9 +163,11 @@ static int s_entry_digits = DEFAULT_ENTRY_DIGITS;
 static bool s_entry_fresh = true;
 static bool s_after_complete = false; /* Done banner until edit/start */
 static int s_remain_sec = 0;
-/** Planned session length and user captured at lamp-on (for exposure log). */
+/** Planned session length and user/therapy captured at lamp-on (for exposure log). */
 static int s_session_planned_sec = 0;
 static int s_session_user_id = 0;
+static int s_session_therapy_id = 0;
+static int s_session_skin_id = 0;
 static int64_t s_last_tick_us = 0;
 static int64_t s_last_input_us = 0;
 
@@ -223,6 +225,9 @@ static pick_item_t s_skins[PICK_LIST_MAX];
 static int s_skin_count;
 static int s_pending_therapy_id;
 static char s_pending_therapy_name[24];
+/** Keypad therapy/skin from last therapy reply (logged on lamp-off). */
+static int s_therapy_id;
+static int s_skin_id;
 /** From last therapy reply: C/D step recommended; * restores initial. */
 static int s_step_seconds = DEFAULT_STEP_SECONDS;
 static int s_max_seconds = DEFAULT_MAX_SECONDS;
@@ -1611,6 +1616,8 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     const cJSON *maxj = cJSON_GetObjectItemCaseSensitive(j, "max_seconds");
     const cJSON *initj = cJSON_GetObjectItemCaseSensitive(j, "initial_seconds");
     const cJSON *last_dur = cJSON_GetObjectItemCaseSensitive(j, "last_duration_seconds");
+    const cJSON *tid = cJSON_GetObjectItemCaseSensitive(j, "therapy_id");
+    const cJSON *sid = cJSON_GetObjectItemCaseSensitive(j, "skin_id");
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
     const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
     if (!cJSON_IsString(type) || strcasecmp(type->valuestring, "therapy") != 0) {
@@ -1689,6 +1696,16 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
         s_last_duration_sec = 0;
         s_have_last_duration = false;
     }
+    if (cJSON_IsNumber(tid) && tid->valuedouble >= 1 && tid->valuedouble <= 9) {
+        s_therapy_id = (int)tid->valuedouble;
+    } else {
+        s_therapy_id = 0;
+    }
+    if (cJSON_IsNumber(sid) && sid->valuedouble >= 1 && sid->valuedouble <= 6) {
+        s_skin_id = (int)sid->valuedouble;
+    } else {
+        s_skin_id = 0;
+    }
 
     cJSON_Delete(j);
     return true;
@@ -1698,8 +1715,9 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
  * Log completed/aborted light-on interval to Rails (UDP exposure).
  * user_id 0 = Guest. duration_seconds = actual lamp-on time.
  * unix = current wall clock at light-off (end time).
+ * therapy_id / skin_id are keypad ids captured at lamp-on (0 omitted).
  */
-static void report_exposure_log(int user_id, int duration_sec)
+static void report_exposure_log(int user_id, int duration_sec, int therapy_id, int skin_id)
 {
     if (duration_sec < 1) {
         ESP_LOGW(TAG, "exposure log skipped: duration %d", duration_sec);
@@ -1730,6 +1748,12 @@ static void report_exposure_log(int user_id, int duration_sec)
     cJSON_AddNumberToObject(root, "user_id", user_id);
     cJSON_AddNumberToObject(root, "duration_seconds", duration_sec);
     cJSON_AddNumberToObject(root, "unix", (double)now);
+    if (therapy_id >= 1 && therapy_id <= 9) {
+        cJSON_AddNumberToObject(root, "therapy_id", therapy_id);
+    }
+    if (skin_id >= 1 && skin_id <= 6) {
+        cJSON_AddNumberToObject(root, "skin_id", skin_id);
+    }
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!payload) {
@@ -2669,6 +2693,8 @@ static void start_session(void)
     s_remain_sec = total;
     s_session_planned_sec = total;
     s_session_user_id = s_selected_user_id > 0 ? s_selected_user_id : 0;
+    s_session_therapy_id = s_therapy_id;
+    s_session_skin_id = s_skin_id;
     s_last_tick_us = esp_timer_get_time();
     s_state = ST_RUNNING;
     s_entry_fresh = true;
@@ -2698,7 +2724,7 @@ static void session_complete(void)
     int uid = s_session_user_id;
     lamp_set(false);
     piezo_beep();
-    report_exposure_log(uid, elapsed);
+    report_exposure_log(uid, elapsed, s_session_therapy_id, s_session_skin_id);
     if (elapsed >= 1) {
         s_last_duration_sec = elapsed;
         s_have_last_duration = true;
@@ -2717,7 +2743,7 @@ static void abort_to_entry(void)
     int uid = s_session_user_id;
     lamp_set(false);
     if (elapsed >= 1) {
-        report_exposure_log(uid, elapsed);
+        report_exposure_log(uid, elapsed, s_session_therapy_id, s_session_skin_id);
         s_last_duration_sec = elapsed;
         s_have_last_duration = true;
     }

@@ -235,6 +235,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 16, data["step_seconds"]
     assert_equal 333, data["max_seconds"]
     assert_equal 50, data["initial_seconds"]
+    assert_equal 2, data["therapy_id"]
+    assert_equal 1, data["skin_id"]
     assert data["last_duration_seconds"].is_a?(Integer)
     assert data["last_duration_seconds"] >= 0
     assert_not data.key?("error")
@@ -246,9 +248,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   end
 
   test "handle_packet therapy message reports last session age" do
-    user = users(:one)
+    user = users(:fresh)
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      Exposure.where(user_id: user.id).delete_all
       Exposure.create!(
         user: user,
         started_at: Time.zone.parse("2026-08-10 02:16:00"),
@@ -273,9 +274,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   end
 
   test "handle_packet therapy recommends zero when last exposure recent" do
-    user = users(:one)
+    user = users(:fresh)
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      Exposure.where(user_id: user.id).delete_all
       Exposure.create!(user: user, started_at: 10.hours.ago, duration_seconds: 105)
       reply = @listener.handle_packet(
         UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-recent", user_id: user.id),
@@ -287,9 +287,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   end
 
   test "handle_packet therapy recommends last duration after 44 hours" do
-    user = users(:one)
+    user = users(:fresh)
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
-      Exposure.where(user_id: user.id).delete_all
       Exposure.create!(user: user, started_at: 50.hours.ago, duration_seconds: 105)
       reply = @listener.handle_packet(
         UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-old", user_id: user.id),
@@ -303,8 +302,7 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   end
 
   test "handle_packet therapy message when user has no exposures" do
-    user = users(:one)
-    Exposure.where(user_id: user.id).delete_all
+    user = users(:fresh)
     reply = @listener.handle_packet(
       UdpDiscoveryListener.build_therapy_request(identity: "esp-therapy-none", user_id: user.id),
       "192.168.50.48"
@@ -315,6 +313,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 16, data["step_seconds"]
     assert_equal 333, data["max_seconds"]
     assert_equal 50, data["initial_seconds"]
+    assert_equal 2, data["therapy_id"]
+    assert_equal 1, data["skin_id"]
     assert_equal 0, data["last_duration_seconds"]
   end
 
@@ -354,6 +354,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_not data.key?("step_seconds")
     assert_not data.key?("max_seconds")
     assert_not data.key?("initial_seconds")
+    assert_not data.key?("therapy_id")
+    assert_not data.key?("skin_id")
     assert_not data.key?("last_duration_seconds")
   end
 
@@ -391,7 +393,6 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
   test "handle_packet assign_therapy sets manual for guest" do
     User.ensure_guest!
     guest = User.find(0)
-    UserTherapy.where(user_id: 0).delete_all
 
     reply = @listener.handle_packet(
       UdpDiscoveryListener.build_assign_therapy_request(
@@ -457,6 +458,8 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal 10, data["step_seconds"]
     assert_equal 1200, data["max_seconds"]
     assert_equal 30, data["initial_seconds"]
+    assert_not data.key?("therapy_id")
+    assert_not data.key?("skin_id")
     assert data["last_duration_seconds"].is_a?(Integer)
     assert_not data.key?("error")
   end
@@ -501,6 +504,53 @@ class UdpDiscoveryListenerTest < ActiveSupport::TestCase
     assert_equal user.id, exposure.user_id
     assert_equal duration, exposure.duration_seconds
     assert_in_delta ended - duration.seconds, exposure.started_at, 1.second
+    assert_equal therapy_types(:psoriasis), exposure.therapy_type
+    assert_equal skin_types(:one), exposure.skin_type
+  end
+
+  test "handle_packet exposure records keypad therapy_id from the module" do
+    user = users(:two)
+    unix = Time.zone.parse("2026-07-24 17:00:00").to_i
+
+    assert_difference("Exposure.count", 1) do
+      reply = @listener.handle_packet(
+        UdpDiscoveryListener.build_exposure_request(
+          identity: "esp-exp-therapy",
+          user_id: user.id,
+          duration_seconds: 50,
+          unix: unix,
+          therapy_id: 1
+        ),
+        "192.168.50.64"
+      )
+      assert_equal true, JSON.parse(reply)["ok"]
+    end
+
+    exposure = Exposure.order(:id).last
+    assert_equal therapy_types(:manual), exposure.therapy_type
+    assert_nil exposure.skin_type
+    assert_equal "Manual", exposure.therapy_label
+  end
+
+  test "handle_packet exposure records psoriasis skin with therapy" do
+    user = users(:one)
+    unix = Time.zone.parse("2026-07-24 17:30:00").to_i
+    reply = @listener.handle_packet(
+      UdpDiscoveryListener.build_exposure_request(
+        identity: "esp-exp-pso",
+        user_id: user.id,
+        duration_seconds: 50,
+        unix: unix,
+        therapy_id: 2,
+        skin_id: 3
+      ),
+      "192.168.50.65"
+    )
+    assert_equal true, JSON.parse(reply)["ok"]
+    exposure = Exposure.order(:id).last
+    assert_equal therapy_types(:psoriasis), exposure.therapy_type
+    assert_equal skin_types(:three), exposure.skin_type
+    assert_equal "Psoriasis — Type III", exposure.therapy_label
   end
 
   test "handle_packet exposure logs for guest id 0" do

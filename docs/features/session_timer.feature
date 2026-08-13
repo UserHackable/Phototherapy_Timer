@@ -112,6 +112,7 @@ Feature: Session timer entry and countdown
     And the piezo beeps briefly once
     And the module sends a UDP exposure log for the selected user (or Guest id 0)
     And the log includes duration_seconds equal to the lamp-on time and unix end time
+    And the log includes therapy_id and skin_id from the last therapy reply when present
     And the UI shows done with the last programmed time
     And "#" will repeat that time
 

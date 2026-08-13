@@ -22,6 +22,16 @@
   </div>
 
   <div>
+    <%= form.label :therapy_type_id, "Therapy", style: "display: block" %>
+    <%= form.collection_select :therapy_type_id, TherapyType.ordered, :id, :keypad_label, include_blank: "None" %>
+  </div>
+
+  <div>
+    <%= form.label :skin_type_id, "Skin type", style: "display: block" %>
+    <%= form.collection_select :skin_type_id, SkinType.ordered, :id, :label, include_blank: "None" %>
+  </div>
+
+  <div>
     <%= form.submit %>
   </div>
 <% end %>

@@ -28,13 +28,20 @@ class ExposuresControllerTest < ActionDispatch::IntegrationTest
   test "should create exposure for user" do
     assert_difference("Exposure.count") do
       post user_exposures_url(@user), params: {
-        exposure: { duration_seconds: 90, started_at: Time.current }
+        exposure: {
+          duration_seconds: 90,
+          started_at: Time.current,
+          therapy_type_id: therapy_types(:psoriasis).id,
+          skin_type_id: skin_types(:one).id
+        }
       }
     end
 
     exposure = Exposure.order(:id).last
     assert_equal @user.id, exposure.user_id
     assert_equal 90, exposure.duration_seconds
+    assert_equal therapy_types(:psoriasis), exposure.therapy_type
+    assert_equal skin_types(:one), exposure.skin_type
     assert_redirected_to user_exposure_url(@user, exposure)
   end
 

@@ -34,6 +34,10 @@ class User < ApplicationRecord
     therapy_duration(:initial_seconds, default: default)
   end
 
+  def current_assignment
+    user_therapies.includes(:therapy_type, :skin_type).newest_first.first
+  end
+
   def therapy_duration(field, default:)
     user_therapies.includes(:therapy_type, :skin_type).newest_first.each do |assignment|
       sec = assignment.public_send(field)

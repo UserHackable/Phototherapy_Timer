@@ -10,6 +10,7 @@
       <thead>
         <tr>
           <th>Started</th>
+          <th>Therapy</th>
           <th>Duration</th>
           <th>Ended</th>
           <th></th>
@@ -19,6 +20,7 @@
         <% @exposures.each do |exposure| %>
           <tr id="<%= dom_id exposure %>">
             <td><%= l(exposure.started_at, format: :long) if exposure.started_at %></td>
+            <td><%= exposure.therapy_label.presence || "—" %></td>
             <td><%= exposure.duration_mmss %> (<%= exposure.duration_seconds %>s)</td>
             <td><%= l(exposure.ended_at, format: :long) if exposure.ended_at %></td>
             <td><%= link_to "Show", [ @user, exposure ] %></td>

@@ -78,21 +78,19 @@ class UserTherapyTest < ActiveSupport::TestCase
   end
 
   test "user without assignment uses default step max and initial seconds" do
-    UserTherapy.delete_all
-    assert_equal 10, users(:one).therapy_step_seconds
-    assert_equal 1200, users(:one).therapy_max_seconds
-    assert_equal 30, users(:one).therapy_initial_seconds
+    assert_equal 10, users(:unassigned).therapy_step_seconds
+    assert_equal 1200, users(:unassigned).therapy_max_seconds
+    assert_equal 30, users(:unassigned).therapy_initial_seconds
   end
 
   test "manual therapy uses 15 second step, 20 minute max, and 30 second initial" do
-    UserTherapy.delete_all
-    assignment = users(:one).user_therapies.create!(therapy_type: therapy_types(:manual))
+    assignment = users(:unassigned).user_therapies.create!(therapy_type: therapy_types(:manual))
     assert_equal 15, assignment.step_seconds
     assert_equal 1200, assignment.max_seconds
     assert_equal 30, assignment.initial_seconds
-    assert_equal 15, users(:one).therapy_step_seconds
-    assert_equal 1200, users(:one).therapy_max_seconds
-    assert_equal 30, users(:one).therapy_initial_seconds
+    assert_equal 15, users(:unassigned).therapy_step_seconds
+    assert_equal 1200, users(:unassigned).therapy_max_seconds
+    assert_equal 30, users(:unassigned).therapy_initial_seconds
   end
 
   test "label includes skin type when present" do

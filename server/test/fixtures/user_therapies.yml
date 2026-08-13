@@ -9,3 +9,8 @@ two_eczema:
   user: two
   therapy_type: eczema
   skin_type:
+
+fresh_psoriasis:
+  user: fresh
+  therapy_type: psoriasis
+  skin_type: one

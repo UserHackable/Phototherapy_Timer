@@ -4,7 +4,7 @@ class ExposuresController < ApplicationController
 
   # GET /users/:user_id/exposures
   def index
-    @exposures = @user.exposures.newest_first
+    @exposures = @user.exposures.includes(:therapy_type, :skin_type).newest_first
   end
 
   # GET /users/:user_id/exposures/:id
@@ -56,6 +56,9 @@ class ExposuresController < ApplicationController
     end
 
     def exposure_params
-      params.expect(exposure: [ :started_at, :duration_seconds ])
+      permitted = params.expect(exposure: [ :started_at, :duration_seconds, :therapy_type_id, :skin_type_id ])
+      permitted[:therapy_type_id] = nil if permitted[:therapy_type_id].blank?
+      permitted[:skin_type_id] = nil if permitted[:skin_type_id].blank?
+      permitted
     end
 end

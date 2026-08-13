@@ -87,6 +87,7 @@ Feature: LAN device discovery over UDP JSON
     And max_seconds is the user's EGT listed max, Manual or none 1200
     And initial_seconds is the user's EGT listed initial, Manual 30, or 30 if none
     And last_duration_seconds is that user's newest exposure duration, or 0
+    And therapy_id and skin_id are the user's current assignment keypad ids, omitted if none
     And the sending device is upserted like a ping
 
   Scenario: Therapy request for unknown user returns not_found
