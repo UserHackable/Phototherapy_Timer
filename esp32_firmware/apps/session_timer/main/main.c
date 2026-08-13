@@ -12,12 +12,18 @@
  *   - Ping reports app + running git version; logs match vs published OTA
  *   - UDP status: mode, user, lamp/fan, LCD lines, LED text (on display change + ping)
  *   - Key A: user list; digit: therapy recommendation → loads MMSS entry
+ *   - A then user digit then B then therapy digit assigns in one sequence
+ *     (A1B4 = user 1, Eczema). Keys typed during UDP waits are kept.
  *   - Key B: therapy list; digit selects type; psoriasis then skin type I–VI
  *   - Therapy reply optional "message" → show on 16x2 LCD, then entry UI
  *   - Therapy reply step_seconds + max_seconds + initial_seconds
  *   - Key *: restore initial_seconds (30 s until a therapy reply)
  *   - Key C/D: recommended ± step_seconds; stay 0 if recommended is 0
  *   - UDP type "ota" (web /devices): check for LAN firmware now (idle only)
+ *   - Watcher: UDP key / status / watch remembers the sender and echoes
+ *     status there on state changes. type "unwatch" stops those echoes.
+ *     Injected keys set test flag; a real keypad press clears it first.
+ *     Test mode: UV SSR stays off; UI / fan / countdown / exposure still run.
  *   - Lamp off → UDP exposure log (user, duration, unix, therapy_id, skin_id)
  *   - Server IP from UDP discovery only (no hardcoded LAN host)
  *   - LAN OTA via uh_ota when idle (not during lamp session); see docs/ota.md
@@ -157,6 +163,101 @@ static bool s_tm_ok;
 static keypad_i2c_t s_kp;
 static bool s_kp_ok;
 
+/* Keys typed during blocking UDP / LCD holds are queued, then drained. */
+#define KEY_Q_CAP 8
+static char s_key_q[KEY_Q_CAP];
+static uint8_t s_key_q_head;
+static uint8_t s_key_q_n;
+static char s_key_pending;
+static int s_key_pending_ms;
+static int s_key_release_count = RELEASE_POLLS;
+static bool s_key_armed = true;
+/** True only for UDP-injected keys; a real keypad press clears this first. */
+static bool s_test_flag;
+static void mark_status_dirty(void);
+static void maybe_send_status(void);
+
+static void key_q_push(char k)
+{
+    if (s_key_q_n >= KEY_Q_CAP) {
+        return;
+    }
+    s_key_q[(s_key_q_head + s_key_q_n) % KEY_Q_CAP] = k;
+    s_key_q_n++;
+}
+
+static bool key_q_pop(char *out)
+{
+    if (s_key_q_n == 0) {
+        return false;
+    }
+    if (out) {
+        *out = s_key_q[s_key_q_head];
+    }
+    s_key_q_head = (s_key_q_head + 1) % KEY_Q_CAP;
+    s_key_q_n--;
+    return true;
+}
+
+static bool key_q_peek(char *out)
+{
+    if (s_key_q_n == 0) {
+        return false;
+    }
+    if (out) {
+        *out = s_key_q[s_key_q_head];
+    }
+    return true;
+}
+
+/** One debounce scan. elapsed_ms is added to the current press timer. */
+static void keypad_collect(int elapsed_ms)
+{
+    if (!s_kp_ok || elapsed_ms <= 0) {
+        return;
+    }
+    char key = '\0';
+    bool down = keypad_i2c_scan(&s_kp, &key);
+    if (down) {
+        s_key_release_count = 0;
+        if (key == s_key_pending) {
+            s_key_pending_ms += elapsed_ms;
+        } else {
+            s_key_pending = key;
+            s_key_pending_ms = elapsed_ms;
+        }
+        if (s_key_armed && s_key_pending_ms >= DEBOUNCE_MS) {
+            s_key_armed = false;
+            s_test_flag = false;
+            key_q_push(s_key_pending);
+            mark_status_dirty();
+            ESP_LOGI(TAG, "key '%c' queued n=%d test=0 (keypad)", s_key_pending, (int)s_key_q_n);
+        }
+        return;
+    }
+    if (s_key_release_count < RELEASE_POLLS) {
+        s_key_release_count++;
+    }
+    if (s_key_release_count >= RELEASE_POLLS) {
+        s_key_pending = '\0';
+        s_key_pending_ms = 0;
+        s_key_armed = true;
+    }
+}
+
+/** Wait up to timeout_ms, aborting early if another key is already queued. */
+static void hold_collecting_keys(int timeout_ms)
+{
+    int left = timeout_ms;
+    while (left > 0 && s_key_q_n == 0) {
+        int slice = left > POLL_MS ? POLL_MS : left;
+        keypad_collect(slice);
+        maybe_send_status();
+        vTaskDelay(pdMS_TO_TICKS(slice));
+        left -= slice;
+    }
+}
+
 static state_t s_state = ST_ENTRY;
 static int s_entry = DEFAULT_ENTRY_MMSS;
 static int s_entry_digits = DEFAULT_ENTRY_DIGITS;
@@ -186,6 +287,9 @@ static bool s_ota_boot_marked;
 /** Set by UDP type "ota" (web poke); maybe_ota_check runs on the next idle pass. */
 static volatile bool s_ota_requested;
 static int s_cmd_sock = -1;
+/** Watcher (LAN host) that receives status on state changes. */
+static struct sockaddr_in s_cmd_peer;
+static bool s_have_cmd_peer;
 
 static char s_device_identity[40];
 static char s_server_ip[16];
@@ -285,12 +389,15 @@ static void fan_set(bool on)
 
 static void lamp_set(bool on)
 {
-    int level = on ? 1 : 0;
-    gpio_set_level(SSR_GPIO, level);
-    gpio_set_level(LAMP_LED_GPIO, level); /* status LED mirrors lamps only */
+    /* Test mode: UI / fan / exposure behave as if the lamp is on; UV SSR stays off. */
+    int ssr = (on && !s_test_flag) ? 1 : 0;
+    int led = on ? 1 : 0; /* LED mirrors logical lamp (safe, not UV) */
+    gpio_set_level(SSR_GPIO, ssr);
+    gpio_set_level(LAMP_LED_GPIO, led);
     s_lamp_on = on;
     mark_status_dirty();
-    ESP_LOGI(TAG, "lamp %s", on ? "ON" : "OFF");
+    ESP_LOGI(TAG, "lamp %s%s", on ? "ON" : "OFF",
+             (on && s_test_flag) ? " (test: SSR off)" : "");
 
     if (on) {
         /* Lamp on → fan on immediately; cancel any rundown. */
@@ -993,6 +1100,7 @@ static cJSON *status_object(void)
     cJSON_AddBoolToObject(st, "lamp", s_lamp_on);
     cJSON_AddBoolToObject(st, "fan", s_fan_on);
     cJSON_AddBoolToObject(st, "after_complete", s_after_complete);
+    cJSON_AddBoolToObject(st, "test", s_test_flag);
 
     cJSON *lcd = cJSON_CreateArray();
     if (lcd) {
@@ -1005,18 +1113,72 @@ static cJSON *status_object(void)
     return st;
 }
 
-static void send_status_datagram(void)
+static void remember_cmd_peer(const struct sockaddr_in *src)
 {
-    if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
+    if (!src || src->sin_addr.s_addr == 0) {
         return;
     }
-    if (s_device_identity[0] == '\0') {
-        return;
-    }
+    s_cmd_peer = *src;
+    s_have_cmd_peer = true;
+    ESP_LOGI(TAG, "watcher %s:%u", inet_ntoa(src->sin_addr),
+             (unsigned)ntohs(src->sin_port));
+}
 
+static bool watcher_is(const struct sockaddr_in *src)
+{
+    return s_have_cmd_peer && src &&
+           src->sin_addr.s_addr == s_cmd_peer.sin_addr.s_addr;
+}
+
+static bool forget_cmd_peer(const struct sockaddr_in *src)
+{
+    if (!s_have_cmd_peer) {
+        return true;
+    }
+    if (src && !watcher_is(src)) {
+        ESP_LOGW(TAG, "unwatch ignored (not current watcher)");
+        return false;
+    }
+    ESP_LOGI(TAG, "watcher cleared");
+    memset(&s_cmd_peer, 0, sizeof(s_cmd_peer));
+    s_have_cmd_peer = false;
+    return true;
+}
+
+static void send_status_to(const struct sockaddr_in *dest, const char *payload)
+{
+    if (!dest || !payload) {
+        return;
+    }
+    int sock = s_cmd_sock;
+    bool owned = false;
+    if (sock < 0) {
+        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (sock < 0) {
+            return;
+        }
+        owned = true;
+    }
+    char ip[16];
+    inet_ntop(AF_INET, &dest->sin_addr, ip, sizeof(ip));
+    ESP_LOGI(TAG, "status → %s:%u %s", ip, (unsigned)ntohs(dest->sin_port), payload);
+    if (sendto(sock, payload, strlen(payload), 0, (const struct sockaddr *)dest,
+               sizeof(*dest)) < 0) {
+        ESP_LOGW(TAG, "status sendto errno %d", errno);
+    }
+    if (owned) {
+        close(sock);
+    }
+}
+
+static char *build_status_payload(void)
+{
+    if (s_device_identity[0] == '\0') {
+        return NULL;
+    }
     cJSON *root = cJSON_CreateObject();
     if (!root) {
-        return;
+        return NULL;
     }
     cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
     cJSON_AddStringToObject(root, "type", "status");
@@ -1029,28 +1191,30 @@ static void send_status_datagram(void)
     }
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    return payload;
+}
+
+static void send_status_datagram(void)
+{
+    if (!s_have_ip) {
+        return;
+    }
+    char *payload = build_status_payload();
     if (!payload) {
         return;
     }
 
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        free(payload);
-        return;
+    if (s_have_server && s_server_ip[0] != '\0') {
+        struct sockaddr_in dest = {0};
+        dest.sin_family = AF_INET;
+        dest.sin_port = htons(DISCOVERY_PORT);
+        if (inet_aton(s_server_ip, &dest.sin_addr) != 0) {
+            send_status_to(&dest, payload);
+        }
     }
-    struct sockaddr_in dest = {0};
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(DISCOVERY_PORT);
-    if (inet_aton(s_server_ip, &dest.sin_addr) == 0) {
-        close(sock);
-        free(payload);
-        return;
+    if (s_have_cmd_peer) {
+        send_status_to(&s_cmd_peer, payload);
     }
-    ESP_LOGI(TAG, "status → %s:%d %s", s_server_ip, DISCOVERY_PORT, payload);
-    if (sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-        ESP_LOGW(TAG, "status sendto errno %d", errno);
-    }
-    close(sock);
     free(payload);
 }
 
@@ -1063,7 +1227,10 @@ static void maybe_send_status(void)
     if (s_last_status_us > 0 && (now - s_last_status_us) < (int64_t)STATUS_MIN_MS * 1000) {
         return;
     }
-    if (!s_have_ip || !s_have_server || s_server_ip[0] == '\0') {
+    if (!s_have_ip) {
+        return;
+    }
+    if ((!s_have_server || s_server_ip[0] == '\0') && !s_have_cmd_peer) {
         return;
     }
     s_status_dirty = false;
@@ -1139,8 +1306,8 @@ static bool discovery_once(void)
     int yes = 1;
     setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
     struct timeval tv = {
-        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
-        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
+        .tv_sec = 0,
+        .tv_usec = POLL_MS * 1000,
     };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -1170,12 +1337,14 @@ static bool discovery_once(void)
     bool found = false;
     int64_t deadline = esp_timer_get_time() + ((int64_t)DISCOVERY_TIMEOUT_MS * 1000);
     while (esp_timer_get_time() < deadline) {
+        keypad_collect(POLL_MS);
+        maybe_send_status();
         char rx[512];
         struct sockaddr_in src = {0};
         socklen_t slen = sizeof(src);
         int n = recvfrom(sock, rx, sizeof(rx) - 1, 0, (struct sockaddr *)&src, &slen);
         if (n < 0) {
-            break;
+            continue;
         }
         rx[n] = '\0';
 
@@ -1245,6 +1414,8 @@ static void ui_therapies_page_paint(void);
 static void enter_therapies_mode(void);
 static void enter_skins_mode(void);
 static void do_therapy_list_key(void);
+static int udp_rpc(cJSON *root, char *rx, size_t rx_cap);
+static void on_key(char k);
 
 /** Request users 1–9 from Rails (UDP JSON). Uses known server IP from discovery. */
 static bool request_user_list(void)
@@ -1265,53 +1436,11 @@ static bool request_user_list(void)
     cJSON_AddNumberToObject(root, "v", DISCOVERY_JSON_V);
     cJSON_AddStringToObject(root, "type", "users");
     cJSON_AddStringToObject(root, "identity", s_device_identity);
-    char *payload = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!payload) {
-        return false;
-    }
-
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        free(payload);
-        return false;
-    }
-    struct timeval tv = {
-        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
-        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
-    };
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    struct sockaddr_in dest = {0};
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(DISCOVERY_PORT);
-    if (inet_aton(s_server_ip, &dest.sin_addr) == 0) {
-        ESP_LOGW(TAG, "users: bad server ip %s", s_server_ip);
-        close(sock);
-        free(payload);
-        return false;
-    }
-
-    ESP_LOGI(TAG, "users request → %s:%d %s", s_server_ip, DISCOVERY_PORT, payload);
-    if (sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-        ESP_LOGW(TAG, "users sendto errno %d", errno);
-        close(sock);
-        free(payload);
-        return false;
-    }
-    free(payload);
 
     char rx[1024];
-    struct sockaddr_in src = {0};
-    socklen_t slen = sizeof(src);
-    int n = recvfrom(sock, rx, sizeof(rx) - 1, 0, (struct sockaddr *)&src, &slen);
-    close(sock);
-    if (n < 0) {
-        ESP_LOGW(TAG, "users: no reply");
+    if (udp_rpc(root, rx, sizeof(rx)) < 0) {
         return false;
     }
-    rx[n] = '\0';
-    ESP_LOGI(TAG, "users reply: %s", rx);
 
     cJSON *j = cJSON_Parse(rx);
     if (!j) {
@@ -1375,8 +1504,8 @@ static int udp_rpc(cJSON *root, char *rx, size_t rx_cap)
         return -1;
     }
     struct timeval tv = {
-        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
-        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
+        .tv_sec = 0,
+        .tv_usec = POLL_MS * 1000,
     };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -1399,17 +1528,23 @@ static int udp_rpc(cJSON *root, char *rx, size_t rx_cap)
     }
     free(payload);
 
-    struct sockaddr_in src = {0};
-    socklen_t slen = sizeof(src);
-    int n = recvfrom(sock, rx, rx_cap - 1, 0, (struct sockaddr *)&src, &slen);
-    close(sock);
-    if (n < 0) {
-        ESP_LOGW(TAG, "udp_rpc: no reply");
-        return -1;
+    int64_t deadline = esp_timer_get_time() + ((int64_t)DISCOVERY_TIMEOUT_MS * 1000);
+    while (esp_timer_get_time() < deadline) {
+        keypad_collect(POLL_MS);
+        maybe_send_status();
+        struct sockaddr_in src = {0};
+        socklen_t slen = sizeof(src);
+        int n = recvfrom(sock, rx, rx_cap - 1, 0, (struct sockaddr *)&src, &slen);
+        if (n >= 0) {
+            rx[n] = '\0';
+            ESP_LOGI(TAG, "udp ← %s", rx);
+            close(sock);
+            return n;
+        }
     }
-    rx[n] = '\0';
-    ESP_LOGI(TAG, "udp ← %s", rx);
-    return n;
+    close(sock);
+    ESP_LOGW(TAG, "udp_rpc: no reply");
+    return -1;
 }
 
 static int parse_pick_array(const cJSON *arr, pick_item_t *out, int cap, bool want_skin_flag)
@@ -1475,8 +1610,126 @@ static bool request_therapy_list(void)
     return s_therapy_count > 0;
 }
 
-static bool request_assign_therapy(int user_id, int therapy_id, int skin_id)
+/** Apply last-session / step / max / initial from a therapy or assign_therapy JSON. */
+static bool apply_therapy_fields(const cJSON *j, int *out_sec, char *name_out, size_t name_cap,
+                                 char *message_out, size_t message_cap)
 {
+    if (!j) {
+        return false;
+    }
+    const cJSON *rec = cJSON_GetObjectItemCaseSensitive(j, "recommended_seconds");
+    const cJSON *step = cJSON_GetObjectItemCaseSensitive(j, "step_seconds");
+    const cJSON *step_min = cJSON_GetObjectItemCaseSensitive(j, "step_minutes");
+    const cJSON *maxj = cJSON_GetObjectItemCaseSensitive(j, "max_seconds");
+    const cJSON *initj = cJSON_GetObjectItemCaseSensitive(j, "initial_seconds");
+    const cJSON *last_dur = cJSON_GetObjectItemCaseSensitive(j, "last_duration_seconds");
+    const cJSON *tid = cJSON_GetObjectItemCaseSensitive(j, "therapy_id");
+    const cJSON *sid = cJSON_GetObjectItemCaseSensitive(j, "skin_id");
+    const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
+    const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
+
+    if (message_out && message_cap > 0 && cJSON_IsString(message) && message->valuestring) {
+        strncpy(message_out, message->valuestring, message_cap - 1);
+        message_out[message_cap - 1] = '\0';
+    }
+    if (!cJSON_IsNumber(rec) || rec->valuedouble < 0) {
+        return false;
+    }
+    int sec = (int)rec->valuedouble;
+    if (sec > MAX_SESSION_SEC) {
+        sec = MAX_SESSION_SEC;
+    }
+    s_recommended_seconds = sec;
+    s_have_recommended = true;
+    if (out_sec) {
+        *out_sec = sec;
+    }
+    if (name_out && name_cap > 0 && cJSON_IsString(name) && name->valuestring) {
+        strncpy(name_out, name->valuestring, name_cap - 1);
+        name_out[name_cap - 1] = '\0';
+    }
+
+    if (cJSON_IsNumber(step) && step->valuedouble >= 0) {
+        int step_sec = (int)step->valuedouble;
+        if (step_sec > MAX_SESSION_SEC) {
+            step_sec = MAX_SESSION_SEC;
+        }
+        s_step_seconds = step_sec;
+    } else if (cJSON_IsNumber(step_min) && step_min->valuedouble >= 0) {
+        int step_sec = (int)step_min->valuedouble * 60;
+        if (step_sec > MAX_SESSION_SEC) {
+            step_sec = MAX_SESSION_SEC;
+        }
+        s_step_seconds = step_sec;
+    } else {
+        s_step_seconds = DEFAULT_STEP_SECONDS;
+    }
+    if (cJSON_IsNumber(maxj) && maxj->valuedouble > 0) {
+        int mx = (int)maxj->valuedouble;
+        if (mx > MAX_SESSION_SEC) {
+            mx = MAX_SESSION_SEC;
+        }
+        s_max_seconds = mx;
+    } else {
+        s_max_seconds = DEFAULT_MAX_SECONDS;
+    }
+    if (cJSON_IsNumber(initj) && initj->valuedouble > 0) {
+        int init_sec = (int)initj->valuedouble;
+        if (init_sec > MAX_SESSION_SEC) {
+            init_sec = MAX_SESSION_SEC;
+        }
+        s_initial_seconds = init_sec;
+    } else {
+        s_initial_seconds = DEFAULT_INITIAL_SECONDS;
+    }
+    if (cJSON_IsNumber(last_dur) && last_dur->valuedouble >= 0) {
+        int last_sec = (int)last_dur->valuedouble;
+        if (last_sec > MAX_SESSION_SEC) {
+            last_sec = MAX_SESSION_SEC;
+        }
+        s_last_duration_sec = last_sec;
+        s_have_last_duration = true;
+    } else {
+        s_last_duration_sec = 0;
+        s_have_last_duration = false;
+    }
+    if (cJSON_IsNumber(tid) && tid->valuedouble >= 1 && tid->valuedouble <= 9) {
+        s_therapy_id = (int)tid->valuedouble;
+    } else {
+        s_therapy_id = 0;
+    }
+    if (cJSON_IsNumber(sid) && sid->valuedouble >= 1 && sid->valuedouble <= 6) {
+        s_skin_id = (int)sid->valuedouble;
+    } else {
+        s_skin_id = 0;
+    }
+    if (s_have_recommended && s_recommended_seconds > s_max_seconds) {
+        s_recommended_seconds = s_max_seconds;
+        if (out_sec) {
+            *out_sec = s_max_seconds;
+        }
+    }
+    return true;
+}
+
+static bool request_assign_therapy(int user_id, int therapy_id, int skin_id,
+                                   int *out_sec, char *name_out, size_t name_cap,
+                                   char *message_out, size_t message_cap,
+                                   bool *applied_last_session)
+{
+    if (applied_last_session) {
+        *applied_last_session = false;
+    }
+    if (out_sec) {
+        *out_sec = 0;
+    }
+    if (name_out && name_cap > 0) {
+        name_out[0] = '\0';
+    }
+    if (message_out && message_cap > 0) {
+        message_out[0] = '\0';
+    }
+
     cJSON *root = cJSON_CreateObject();
     if (!root) {
         return false;
@@ -1490,7 +1743,7 @@ static bool request_assign_therapy(int user_id, int therapy_id, int skin_id)
         cJSON_AddNumberToObject(root, "skin_id", skin_id);
     }
 
-    char rx[512];
+    char rx[1024];
     if (udp_rpc(root, rx, sizeof(rx)) < 0) {
         return false;
     }
@@ -1506,6 +1759,11 @@ static bool request_assign_therapy(int user_id, int therapy_id, int skin_id)
                 cJSON_IsTrue(ok);
     if (!good && cJSON_IsString(err) && err->valuestring) {
         ESP_LOGW(TAG, "assign_therapy error: %s", err->valuestring);
+    }
+    if (good && apply_therapy_fields(j, out_sec, name_out, name_cap, message_out, message_cap)) {
+        if (applied_last_session) {
+            *applied_last_session = true;
+        }
     }
     cJSON_Delete(j);
     return good;
@@ -1556,53 +1814,11 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     cJSON_AddStringToObject(root, "type", "therapy");
     cJSON_AddStringToObject(root, "identity", s_device_identity);
     cJSON_AddNumberToObject(root, "user_id", user_id);
-    char *payload = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!payload) {
-        return false;
-    }
-
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock < 0) {
-        free(payload);
-        return false;
-    }
-    struct timeval tv = {
-        .tv_sec = DISCOVERY_TIMEOUT_MS / 1000,
-        .tv_usec = (DISCOVERY_TIMEOUT_MS % 1000) * 1000,
-    };
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    struct sockaddr_in dest = {0};
-    dest.sin_family = AF_INET;
-    dest.sin_port = htons(DISCOVERY_PORT);
-    if (inet_aton(s_server_ip, &dest.sin_addr) == 0) {
-        ESP_LOGW(TAG, "therapy: bad server ip %s", s_server_ip);
-        close(sock);
-        free(payload);
-        return false;
-    }
-
-    ESP_LOGI(TAG, "therapy request → %s:%d %s", s_server_ip, DISCOVERY_PORT, payload);
-    if (sendto(sock, payload, strlen(payload), 0, (struct sockaddr *)&dest, sizeof(dest)) < 0) {
-        ESP_LOGW(TAG, "therapy sendto errno %d", errno);
-        close(sock);
-        free(payload);
-        return false;
-    }
-    free(payload);
 
     char rx[512];
-    struct sockaddr_in src = {0};
-    socklen_t slen = sizeof(src);
-    int n = recvfrom(sock, rx, sizeof(rx) - 1, 0, (struct sockaddr *)&src, &slen);
-    close(sock);
-    if (n < 0) {
-        ESP_LOGW(TAG, "therapy: no reply");
+    if (udp_rpc(root, rx, sizeof(rx)) < 0) {
         return false;
     }
-    rx[n] = '\0';
-    ESP_LOGI(TAG, "therapy reply: %s", rx);
 
     cJSON *j = cJSON_Parse(rx);
     if (!j) {
@@ -1610,105 +1826,23 @@ static bool request_therapy(int user_id, int *out_sec, char *name_out, size_t na
     }
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
     const cJSON *err = cJSON_GetObjectItemCaseSensitive(j, "error");
-    const cJSON *rec = cJSON_GetObjectItemCaseSensitive(j, "recommended_seconds");
-    const cJSON *step = cJSON_GetObjectItemCaseSensitive(j, "step_seconds");
-    const cJSON *step_min = cJSON_GetObjectItemCaseSensitive(j, "step_minutes");
-    const cJSON *maxj = cJSON_GetObjectItemCaseSensitive(j, "max_seconds");
-    const cJSON *initj = cJSON_GetObjectItemCaseSensitive(j, "initial_seconds");
-    const cJSON *last_dur = cJSON_GetObjectItemCaseSensitive(j, "last_duration_seconds");
-    const cJSON *tid = cJSON_GetObjectItemCaseSensitive(j, "therapy_id");
-    const cJSON *sid = cJSON_GetObjectItemCaseSensitive(j, "skin_id");
-    const cJSON *name = cJSON_GetObjectItemCaseSensitive(j, "name");
-    const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
     if (!cJSON_IsString(type) || strcasecmp(type->valuestring, "therapy") != 0) {
         cJSON_Delete(j);
         return false;
     }
-    if (message_out && message_cap > 0 && cJSON_IsString(message) && message->valuestring) {
-        strncpy(message_out, message->valuestring, message_cap - 1);
-        message_out[message_cap - 1] = '\0';
-    }
     if (cJSON_IsString(err) && err->valuestring && err->valuestring[0] != '\0') {
+        const cJSON *message = cJSON_GetObjectItemCaseSensitive(j, "message");
+        if (message_out && message_cap > 0 && cJSON_IsString(message) && message->valuestring) {
+            strncpy(message_out, message->valuestring, message_cap - 1);
+            message_out[message_cap - 1] = '\0';
+        }
         ESP_LOGW(TAG, "therapy error: %s", err->valuestring);
         cJSON_Delete(j);
         return false;
     }
-    if (!cJSON_IsNumber(rec) || rec->valuedouble < 0) {
-        cJSON_Delete(j);
-        return false;
-    }
-    int sec = (int)rec->valuedouble;
-    if (sec > MAX_SESSION_SEC) {
-        sec = MAX_SESSION_SEC;
-    }
-    s_recommended_seconds = sec;
-    s_have_recommended = true;
-    if (out_sec) {
-        *out_sec = sec;
-    }
-    if (name_out && name_cap > 0 && cJSON_IsString(name) && name->valuestring) {
-        strncpy(name_out, name->valuestring, name_cap - 1);
-        name_out[name_cap - 1] = '\0';
-    }
-
-    if (cJSON_IsNumber(step) && step->valuedouble >= 0) {
-        int step_sec = (int)step->valuedouble;
-        if (step_sec > MAX_SESSION_SEC) {
-            step_sec = MAX_SESSION_SEC;
-        }
-        s_step_seconds = step_sec;
-    } else if (cJSON_IsNumber(step_min) && step_min->valuedouble >= 0) {
-        /* Older servers sent minutes. */
-        int step_sec = (int)step_min->valuedouble * 60;
-        if (step_sec > MAX_SESSION_SEC) {
-            step_sec = MAX_SESSION_SEC;
-        }
-        s_step_seconds = step_sec;
-    } else {
-        s_step_seconds = DEFAULT_STEP_SECONDS;
-    }
-    if (cJSON_IsNumber(maxj) && maxj->valuedouble > 0) {
-        int mx = (int)maxj->valuedouble;
-        if (mx > MAX_SESSION_SEC) {
-            mx = MAX_SESSION_SEC;
-        }
-        s_max_seconds = mx;
-    } else {
-        s_max_seconds = DEFAULT_MAX_SECONDS;
-    }
-    if (cJSON_IsNumber(initj) && initj->valuedouble > 0) {
-        int init_sec = (int)initj->valuedouble;
-        if (init_sec > MAX_SESSION_SEC) {
-            init_sec = MAX_SESSION_SEC;
-        }
-        s_initial_seconds = init_sec;
-    } else {
-        s_initial_seconds = DEFAULT_INITIAL_SECONDS;
-    }
-    if (cJSON_IsNumber(last_dur) && last_dur->valuedouble >= 0) {
-        int last_sec = (int)last_dur->valuedouble;
-        if (last_sec > MAX_SESSION_SEC) {
-            last_sec = MAX_SESSION_SEC;
-        }
-        s_last_duration_sec = last_sec;
-        s_have_last_duration = true;
-    } else {
-        s_last_duration_sec = 0;
-        s_have_last_duration = false;
-    }
-    if (cJSON_IsNumber(tid) && tid->valuedouble >= 1 && tid->valuedouble <= 9) {
-        s_therapy_id = (int)tid->valuedouble;
-    } else {
-        s_therapy_id = 0;
-    }
-    if (cJSON_IsNumber(sid) && sid->valuedouble >= 1 && sid->valuedouble <= 6) {
-        s_skin_id = (int)sid->valuedouble;
-    } else {
-        s_skin_id = 0;
-    }
-
+    bool applied = apply_therapy_fields(j, out_sec, name_out, name_cap, message_out, message_cap);
     cJSON_Delete(j);
-    return true;
+    return applied;
 }
 
 /**
@@ -1753,6 +1887,9 @@ static void report_exposure_log(int user_id, int duration_sec, int therapy_id, i
     }
     if (skin_id >= 1 && skin_id <= 6) {
         cJSON_AddNumberToObject(root, "skin_id", skin_id);
+    }
+    if (s_test_flag) {
+        cJSON_AddTrueToObject(root, "test");
     }
     char *payload = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -1885,7 +2022,7 @@ static void show_therapy_message_if_any(const char *message)
     ESP_LOGI(TAG, "therapy message: %s", message);
     lcd_show_message(message);
     note_input();
-    vTaskDelay(pdMS_TO_TICKS(THERAPY_MSG_HOLD_MS));
+    hold_collecting_keys(THERAPY_MSG_HOLD_MS);
     note_input();
     if (s_state == ST_ENTRY) {
         ui_entry_paint_top_keep_bottom();
@@ -1917,6 +2054,18 @@ static void select_user_by_digit(char digit)
     show_led_wall_clock();
     note_input();
 
+    /* A1B4: next key is B, so just select the user and let B assign. */
+    char next = '\0';
+    if (key_q_peek(&next) && next == 'B') {
+        s_selected_user_id = user_id;
+        strncpy(s_selected_user_name, name_buf, sizeof(s_selected_user_name) - 1);
+        s_selected_user_name[sizeof(s_selected_user_name) - 1] = '\0';
+        s_state = ST_ENTRY;
+        note_input();
+        ESP_LOGI(TAG, "user %d selected; B queued — skip therapy load", user_id);
+        return;
+    }
+
     int sec = 0;
     char reply_name[24];
     char message_buf[THERAPY_MSG_CAP];
@@ -1931,7 +2080,7 @@ static void select_user_by_digit(char digit)
         /* Stay in users mode so they can try another digit or wait out. */
         s_state = ST_USERS;
         s_users_page_start_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(message_buf[0] ? THERAPY_MSG_HOLD_MS : 800));
+        hold_collecting_keys(message_buf[0] ? THERAPY_MSG_HOLD_MS : 800);
         ui_users_page_paint();
         return;
     }
@@ -1988,13 +2137,28 @@ static void assign_pending_therapy(int skin_id)
     }
     lcd_status(s_pending_therapy_name[0] ? s_pending_therapy_name : "Therapy",
                "assign…");
-    if (!request_assign_therapy(user_id, s_pending_therapy_id, skin_id)) {
+    int sec = 0;
+    char reply_name[24];
+    char message_buf[THERAPY_MSG_CAP];
+    bool applied = false;
+    if (!request_assign_therapy(user_id, s_pending_therapy_id, skin_id,
+                                &sec, reply_name, sizeof(reply_name),
+                                message_buf, sizeof(message_buf), &applied)) {
         lcd_status("Assign fail", "try again");
         note_input();
         s_state = ST_THERAPIES;
         s_users_page_start_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(800));
+        hold_collecting_keys(800);
         ui_therapies_page_paint();
+        return;
+    }
+    /* Same last-session LCD as A+digit: last lamp-on still counts after the mode change. */
+    if (applied) {
+        char name_buf[24];
+        snprintf(name_buf, sizeof(name_buf), "%s",
+                 reply_name[0] ? reply_name : selected_user_label());
+        apply_therapy_entry(user_id, name_buf, sec);
+        show_therapy_message_if_any(message_buf);
         return;
     }
     reload_therapy_after_assign();
@@ -2453,7 +2617,171 @@ static void cmd_sock_ensure(void)
         return;
     }
     s_cmd_sock = sock;
-    ESP_LOGI(TAG, "cmd sock listening UDP :%d (type ota)", DISCOVERY_PORT);
+    ESP_LOGI(TAG, "cmd sock listening UDP :%d (type ota, key)", DISCOVERY_PORT);
+}
+
+static char normalize_inject_key(char k)
+{
+    if (k >= 'a' && k <= 'd') {
+        return (char)('A' + (k - 'a'));
+    }
+    return k;
+}
+
+static bool valid_inject_key(char k)
+{
+    k = normalize_inject_key(k);
+    if (k >= '0' && k <= '9') {
+        return true;
+    }
+    if (k >= 'A' && k <= 'D') {
+        return true;
+    }
+    return k == '*' || k == '#';
+}
+
+static void cmd_send_json(cJSON *ack, const struct sockaddr_in *src, socklen_t slen)
+{
+    if (!ack) {
+        return;
+    }
+    char *payload = cJSON_PrintUnformatted(ack);
+    cJSON_Delete(ack);
+    if (!payload) {
+        return;
+    }
+    sendto(s_cmd_sock, payload, strlen(payload), 0, (const struct sockaddr *)src, slen);
+    free(payload);
+}
+
+static void cmd_handle_ota(const struct sockaddr_in *src, socklen_t slen)
+{
+    remember_cmd_peer(src);
+    ESP_LOGI(TAG, "ota cmd from %s", inet_ntoa(src->sin_addr));
+    request_ota_check("udp");
+
+    cJSON *ack = cJSON_CreateObject();
+    if (!ack) {
+        return;
+    }
+    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(ack, "type", "ota");
+    cJSON_AddTrueToObject(ack, "ok");
+    cJSON_AddBoolToObject(ack, "busy", !ota_may_start() && s_state == ST_RUNNING);
+    cJSON_AddStringToObject(ack, "version", uh_ota_running_version());
+    cJSON_AddStringToObject(ack, "identity", s_device_identity);
+    cmd_send_json(ack, src, slen);
+}
+
+static void cmd_handle_key(const cJSON *j, const struct sockaddr_in *src, socklen_t slen)
+{
+    char keys[17];
+    int nkeys = 0;
+    const cJSON *one = cJSON_GetObjectItemCaseSensitive(j, "key");
+    const cJSON *many = cJSON_GetObjectItemCaseSensitive(j, "keys");
+    if (cJSON_IsString(many) && many->valuestring) {
+        for (const char *p = many->valuestring; *p && nkeys < (int)sizeof(keys) - 1; p++) {
+            if (*p == ' ' || *p == ',' || *p == '\t') {
+                continue;
+            }
+            char k = normalize_inject_key(*p);
+            if (!valid_inject_key(k)) {
+                continue;
+            }
+            keys[nkeys++] = k;
+        }
+    } else if (cJSON_IsString(one) && one->valuestring && one->valuestring[0]) {
+        char k = normalize_inject_key(one->valuestring[0]);
+        if (valid_inject_key(k)) {
+            keys[nkeys++] = k;
+        }
+    } else if (cJSON_IsNumber(one)) {
+        int d = (int)one->valuedouble;
+        if (d >= 0 && d <= 9) {
+            keys[nkeys++] = (char)('0' + d);
+        }
+    }
+    keys[nkeys] = '\0';
+    remember_cmd_peer(src);
+
+    if (nkeys < 1) {
+        cJSON *ack = cJSON_CreateObject();
+        if (!ack) {
+            return;
+        }
+        cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+        cJSON_AddStringToObject(ack, "type", "key");
+        cJSON_AddFalseToObject(ack, "ok");
+        cJSON_AddStringToObject(ack, "error", "bad_key");
+        cJSON_AddBoolToObject(ack, "test", s_test_flag);
+        cmd_send_json(ack, src, slen);
+        return;
+    }
+
+    ESP_LOGI(TAG, "key cmd from %s keys=%s", inet_ntoa(src->sin_addr), keys);
+    for (int i = 0; i < nkeys; i++) {
+        s_test_flag = true;
+        mark_status_dirty();
+        ESP_LOGI(TAG, "key '%c' test=1 (udp)", keys[i]);
+        on_key(keys[i]);
+    }
+
+    cJSON *ack = cJSON_CreateObject();
+    if (!ack) {
+        return;
+    }
+    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(ack, "type", "key");
+    cJSON_AddTrueToObject(ack, "ok");
+    cJSON_AddStringToObject(ack, "keys", keys);
+    cJSON_AddBoolToObject(ack, "test", s_test_flag);
+    cJSON_AddStringToObject(ack, "identity", s_device_identity);
+    cJSON *st = status_object();
+    if (st) {
+        cJSON_AddItemToObject(ack, "status", st);
+    }
+    cmd_send_json(ack, src, slen);
+}
+
+static void cmd_handle_status(const struct sockaddr_in *src, socklen_t slen)
+{
+    remember_cmd_peer(src);
+    ESP_LOGI(TAG, "status check from %s", inet_ntoa(src->sin_addr));
+    cJSON *ack = cJSON_CreateObject();
+    if (!ack) {
+        return;
+    }
+    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(ack, "type", "status");
+    cJSON_AddTrueToObject(ack, "ok");
+    cJSON_AddBoolToObject(ack, "test", s_test_flag);
+    cJSON_AddStringToObject(ack, "identity", s_device_identity);
+    cJSON *st = status_object();
+    if (st) {
+        cJSON_AddItemToObject(ack, "status", st);
+    }
+    cmd_send_json(ack, src, slen);
+}
+
+static void cmd_handle_unwatch(const struct sockaddr_in *src, socklen_t slen)
+{
+    bool ok = forget_cmd_peer(src);
+    ESP_LOGI(TAG, "unwatch from %s ok=%d", inet_ntoa(src->sin_addr), (int)ok);
+    cJSON *ack = cJSON_CreateObject();
+    if (!ack) {
+        return;
+    }
+    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
+    cJSON_AddStringToObject(ack, "type", "unwatch");
+    if (ok) {
+        cJSON_AddTrueToObject(ack, "ok");
+    } else {
+        cJSON_AddFalseToObject(ack, "ok");
+        cJSON_AddStringToObject(ack, "error", "not_watcher");
+    }
+    cJSON_AddBoolToObject(ack, "watching", s_have_cmd_peer);
+    cJSON_AddStringToObject(ack, "identity", s_device_identity);
+    cmd_send_json(ack, src, slen);
 }
 
 static void cmd_sock_poll(void)
@@ -2476,34 +2804,36 @@ static void cmd_sock_poll(void)
         return;
     }
     const cJSON *type = cJSON_GetObjectItemCaseSensitive(j, "type");
-    bool is_ota = cJSON_IsString(type) && type->valuestring &&
-                  strcasecmp(type->valuestring, "ota") == 0;
     const cJSON *ok = cJSON_GetObjectItemCaseSensitive(j, "ok");
+    bool is_ack = cJSON_IsTrue(ok) || cJSON_IsFalse(ok);
+    const char *t = (cJSON_IsString(type) && type->valuestring) ? type->valuestring : "";
+    if (strcasecmp(t, "ota") == 0 && !is_ack) {
+        cJSON_Delete(j);
+        cmd_handle_ota(&src, slen);
+        return;
+    }
+    if (strcasecmp(t, "key") == 0 && !is_ack) {
+        cmd_handle_key(j, &src, slen);
+        cJSON_Delete(j);
+        return;
+    }
+    if ((strcasecmp(t, "status") == 0 || strcasecmp(t, "check") == 0 ||
+         strcasecmp(t, "watch") == 0) && !is_ack) {
+        /* Host poll / start watching (no nested status). Outgoing module
+         * status also has type "status" plus a status object. */
+        const cJSON *st = cJSON_GetObjectItemCaseSensitive(j, "status");
+        if (!cJSON_IsObject(st)) {
+            cmd_handle_status(&src, slen);
+        }
+        cJSON_Delete(j);
+        return;
+    }
+    if ((strcasecmp(t, "unwatch") == 0 || strcasecmp(t, "stop") == 0) && !is_ack) {
+        cJSON_Delete(j);
+        cmd_handle_unwatch(&src, slen);
+        return;
+    }
     cJSON_Delete(j);
-    if (!is_ota || cJSON_IsTrue(ok) || cJSON_IsFalse(ok)) {
-        return;
-    }
-
-    ESP_LOGI(TAG, "ota cmd from %s", inet_ntoa(src.sin_addr));
-    request_ota_check("udp");
-
-    cJSON *ack = cJSON_CreateObject();
-    if (!ack) {
-        return;
-    }
-    cJSON_AddNumberToObject(ack, "v", DISCOVERY_JSON_V);
-    cJSON_AddStringToObject(ack, "type", "ota");
-    cJSON_AddTrueToObject(ack, "ok");
-    cJSON_AddBoolToObject(ack, "busy", !ota_may_start() && s_state == ST_RUNNING);
-    cJSON_AddStringToObject(ack, "version", uh_ota_running_version());
-    cJSON_AddStringToObject(ack, "identity", s_device_identity);
-    char *payload = cJSON_PrintUnformatted(ack);
-    cJSON_Delete(ack);
-    if (!payload) {
-        return;
-    }
-    sendto(s_cmd_sock, payload, strlen(payload), 0, (struct sockaddr *)&src, slen);
-    free(payload);
 }
 
 /**
@@ -3065,40 +3395,16 @@ void app_main(void)
         enter_entry_mode();
     }
 
-    char pending = '\0';
-    int pending_ms = 0;
-    int release_count = RELEASE_POLLS; /* start armed */
-    bool armed = true;
     int64_t last_clock_paint_us = 0;
     int64_t last_headless_log_us = 0;
 
     while (1) {
         /* Keypad first so Wi‑Fi / LCD paint cannot starve input (skip if absent). */
-        char key = '\0';
-        bool down = s_kp_ok && keypad_i2c_scan(&s_kp, &key);
-        if (down) {
-            release_count = 0;
-            if (key == pending) {
-                pending_ms += POLL_MS;
-            } else {
-                pending = key;
-                pending_ms = POLL_MS;
-            }
-            if (armed && pending_ms >= DEBOUNCE_MS) {
-                armed = false;
-                ESP_LOGI(TAG, "key '%c' state=%d", pending, (int)s_state);
-                on_key(pending);
-            }
-        } else {
-            /* Tolerate single missed scans under Wi‑Fi noise */
-            if (release_count < RELEASE_POLLS) {
-                release_count++;
-            }
-            if (release_count >= RELEASE_POLLS) {
-                pending = '\0';
-                pending_ms = 0;
-                armed = true;
-            }
+        keypad_collect(POLL_MS);
+        char pending;
+        while (key_q_pop(&pending)) {
+            ESP_LOGI(TAG, "key '%c' state=%d", pending, (int)s_state);
+            on_key(pending);
         }
 
         network_maintenance();

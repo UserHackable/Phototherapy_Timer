@@ -51,17 +51,24 @@ UTF-8 JSON objects (single datagram, no framing):
                {"id":3,"name":"Type III"},{"id":4,"name":"Type IV"},
                {"id":5,"name":"Type V"},{"id":6,"name":"Type VI"}]}
 
-// ESP → server (B then digits): assign to selected user (0 = Guest)
-{"v":1,"type":"assign_therapy","identity":"esp32-…","user_id":4,"therapy_id":2,"skin_id":1}
+// ESP → server (A then user digit then B then therapy digit; 0 = Guest)
+// A1B4 assigns Eczema (4) to user 1. Last exposure still counts if therapy_id was omitted.
+{"v":1,"type":"assign_therapy","identity":"esp32-…","user_id":1,"therapy_id":4}
 
-// Server → ESP
-{"v":1,"type":"assign_therapy","ok":true,"user_id":4,"therapy_id":2,"skin_id":1}
+// Server → ESP (same last-session fields as a therapy reply so B+digit
+// looks like A+digit; last lamp-on is kept after the mode change)
+{"v":1,"type":"assign_therapy","ok":true,"user_id":1,"therapy_id":4,
+ "name":"Rob","recommended_seconds":0,"step_seconds":16,"max_seconds":166,
+ "initial_seconds":50,"last_duration_seconds":120,
+ "message":"Last session\n2:00 22h ago"}
 
 // ESP → server (key A, then digit = user id): therapy recommendation
 {"v":1,"type":"therapy","identity":"esp32-b4bfe9e70e64","user_id":4}
 
 // Server → ESP. recommended_seconds is last exposure after 44h, 0 if more recent,
-// else initial_seconds. * on the module restores initial_seconds.
+// else initial_seconds. If that last time is longer than the selected therapy
+// max, recommended is the max. Last exposure is the user's newest lamp-on, even
+// if the therapy mode changed or that session had no protocol. * restores initial.
 // Optional "message" is shown on the module 16x2 after A+digit, then entry UI resumes.
 // Server fills message from that user's newest Exposure (e.g. "Last session 1d 22h ago").
 // C = recommended + step, D = recommended − step.
@@ -77,13 +84,30 @@ UTF-8 JSON objects (single datagram, no framing):
 
 // Server → ESP
 {"v":1,"type":"exposure","ok":true,"id":12,"user_id":0,"duration_seconds":28,"started_at":"…"}
+
+// Watcher → ESP (start watching + snapshot)
+{"v":1,"type":"watch"}
+
+// Host → ESP (LAN test inject; sets test true before each key; also watches)
+{"v":1,"type":"key","keys":"A1B4"}
+
+// Watcher → ESP (stop echoes to this host)
+{"v":1,"type":"unwatch"}
+
+// ESP → host
+{"v":1,"type":"key","ok":true,"keys":"A1B4","test":true,"identity":"esp32-…",
+ "status":{"state":"entry","user":"Rob","test":true,"lcd":["…","…"]}}
 ```
 
 | Field | Where | Meaning |
 |-------|--------|---------|
 | `v` | both | Protocol version (**1**) |
-| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapies"`, `"assign_therapy"`, `"therapy"`, `"exposure"`, `"status"`, or `"ota"` |
+| `type` | both | `"ping"`, `"pong"`, `"users"`, `"therapies"`, `"assign_therapy"`, `"therapy"`, `"exposure"`, `"status"`, `"ota"`, or `"key"` |
 | `ota` | web → server → module | Immediate firmware check (`/devices` **Check for update**) |
+| `key` | watcher → module | Inject keypad (`"keys":"A1B4"`). Sets `test` true, handles the key, registers this host as the watcher. A real keypad press clears `test` first. |
+| `watch` / `status` / `check` | watcher → module | Snapshot + start watching (no nested `status` object). Later state changes are echoed to this host. |
+| `unwatch` / `stop` | watcher → module | Stop echoing status to the current watcher (matched by IP). |
+| `test` | status / key / exposure | True after a UDP key inject; false after a physical keypad press. Test sessions leave the lamp SSR off and are not stored as last-session exposures. |
 | `identity` | both | Device id (`esp32-` + MAC) or server hostname |
 | `app` | ping / pong | Firmware app name (`session_timer`) |
 | `version` | ping | Running image version (git short SHA from `esp_app_desc`) |
@@ -101,11 +125,11 @@ UTF-8 JSON objects (single datagram, no framing):
 | `therapy_id` | assign / therapy / exposure | Keypad **1–4** (Manual / Psoriasis / Vitiligo / Eczema). Therapy reply is the user's current assignment; lamp-off log stores it on the Exposure |
 | `skin_id` | assign / therapy / exposure | Skin keypad **1–6** when the therapy uses a skin type |
 | `user_id` | therapy / assign / exposure | Key digit **0–9** (0 = Guest) |
-| `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry. Last exposure after 44h, **0** if more recent, else `initial_seconds` |
+| `recommended_seconds` | therapy reply | Suggested light-on duration; module loads MMSS entry. Last lamp-on after 44h (any therapy, including none), **capped at `max_seconds`** if that last time is longer than the selected therapy allows; **0** if more recent; else `initial_seconds` |
 | `step_seconds` | therapy reply | Increment for keys **C** / **D** against `recommended_seconds`. From the user's newest therapy assignment (EGT / Manual **15**), else **10** |
 | `max_seconds` | therapy reply | Hard cap for programmed time. EGT listed max, Manual / none **1200** (20:00) |
 | `initial_seconds` | therapy reply | First-session dose. EGT listed initial (psoriasis I–II **50**, III–IV **83**, V–VI **133**; vitiligo / eczema **50**); Manual / none **30**. Key **\*** restores this |
-| `last_duration_seconds` | therapy reply | Newest exposure duration for that user (`0` if none) |
+| `last_duration_seconds` | therapy reply | Newest lamp-on duration for that user (`0` if none). Not filtered by current therapy |
 | `message` | therapy reply | Optional free text for the 16x2 (up to ~32 chars shown; held ~5s) |
 | `duration_seconds` | exposure | Actual lamp-on seconds for this run |
 | `error` | therapy / assign / exposure | Optional: `"not_found"`, `"bad_user_id"`, `"need_skin"`, `"bad_duration"` |
@@ -171,13 +195,16 @@ $EDITOR secrets/wifi.yaml
 ./scripts/fw idf nvs-wifi
 ```
 
-### 4. Flash
+### 4. Firmware on the module
+
+First bring-up (or recovery) is a USB flash. After that the installed
+`session_timer` updates itself over LAN — publish, do not USB-flash from pi.
 
 ```bash
-./scripts/fw idf upload session_timer   # product UI + discovery + clock
-# or
-./scripts/fw idf upload wifi_connect    # bring-up only
-./scripts/fw idf monitor session_timer
+./scripts/fw idf ota-publish session_timer
+# then /devices → Check for update
+# recovery / first dual-OTA table only:
+# ./scripts/fw idf upload session_timer
 ```
 
 ## Success criteria

@@ -124,6 +124,15 @@ Feature: LAN device discovery over UDP JSON
     And skin_types is 1–6 Type I–VI
     And the sending device is upserted like a ping
 
+  Scenario: Assign eczema uses last exposure regardless of therapy mode
+    Given user 1 has a last exposure (no protocol, or a different therapy)
+    When the ESP sends assign_therapy user_id 1 therapy_id 4
+    And then sends therapy for user_id 1
+    Then the assign reply is ok and therapy_id is 4 (Eczema)
+    And last_duration_seconds is that last lamp-on
+    And message is Last session, not No prior session
+    And a later therapy request for that user repeats the same last lamp-on
+
   Scenario: Assign therapy Manual to Guest
     When the ESP sends assign_therapy user_id 0 therapy_id 1
     Then the reply is ok true

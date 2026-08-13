@@ -76,6 +76,7 @@ class DeviceTest < ActiveSupport::TestCase
         "lcd" => [ "rob        1:30", "* clear  start #" ],
         "led" => "01:30",
         "led_kind" => "timer",
+        "test" => true,
         "ignore_me" => "nope"
       }
     )
@@ -84,6 +85,7 @@ class DeviceTest < ActiveSupport::TestCase
     assert_equal "rob", device.last_status["user"]
     assert_equal [ "rob        1:30", "* clear  start #" ], device.last_status["lcd"]
     assert_equal "01:30", device.last_status["led"]
+    assert_equal true, device.last_status["test"]
     assert_not device.last_status.key?("ignore_me")
     assert device.last_status_at.present?
 

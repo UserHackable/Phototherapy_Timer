@@ -105,7 +105,7 @@ Full wire format: [docs/device-discovery.md](../docs/device-discovery.md).
 | `users` | ESP ↔ server | Key **A**: household ids 1–9, then **Guest id 0** |
 | `therapy` | ESP ↔ server | Key **A** then digit: times plus `therapy_id` / `skin_id` for the current assignment; optional `message` |
 | `therapies` | ESP ↔ server | Key **B**: keypad therapy list + skin types |
-| `assign_therapy` | ESP ↔ server | Key **B** then digit(s): assign therapy / skin to the selected user |
+| `assign_therapy` | ESP ↔ server | **A** then user then **B** then therapy (A1B4 = user 1, Eczema). Last lamp-on still counts after a mode change. |
 | `exposure` | ESP → server | Lamp off: log `user_id`, `duration_seconds`, end `unix`, optional `therapy_id` / `skin_id` |
 
 ### ENV

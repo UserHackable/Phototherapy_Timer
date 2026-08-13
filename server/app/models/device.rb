@@ -60,6 +60,7 @@ class Device < ApplicationRecord
     out["lamp"] = !!data["lamp"] unless data["lamp"].nil?
     out["fan"] = !!data["fan"] unless data["fan"].nil?
     out["after_complete"] = !!data["after_complete"] unless data["after_complete"].nil?
+    out["test"] = !!data["test"] unless data["test"].nil?
     if data["lcd"].is_a?(Array)
       out["lcd"] = data["lcd"].first(2).map { |line| line.to_s[0, 16] }
     end

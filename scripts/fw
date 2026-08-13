@@ -17,6 +17,9 @@
 #   ./scripts/fw idf monitor <app>
 #   ./scripts/fw idf nvs-wifi         # provision secrets/wifi.yaml → NVS
 #   ./scripts/fw idf ota-publish <app> # build + push firmware to ami for LAN OTA
+#   ./scripts/fw idf key <keys>       # UDP inject keypad (A1B4); this host is the watcher
+#   ./scripts/fw idf status           # start watching + snapshot
+#   ./scripts/fw idf unwatch          # stop status echoes to this host
 #
 #   ./scripts/fw port
 #
@@ -174,7 +177,16 @@ cmd_idf() {
       app=$(idf_resolve_app "${1:-}")
       "$REPO/scripts/ota-publish.sh" "$app"
       ;;
-    *) die "unknown idf subcommand: $sub (list install build flash upload monitor nvs-wifi ota-publish)" ;;
+    key)
+      "$REPO/scripts/send-key.sh" "${1:-}"
+      ;;
+    status|check|watch)
+      "$REPO/scripts/send-key.sh" status
+      ;;
+    unwatch|stop)
+      "$REPO/scripts/send-key.sh" unwatch
+      ;;
+    *) die "unknown idf subcommand: $sub (list install build flash upload monitor nvs-wifi ota-publish key status unwatch)" ;;
   esac
 }
 

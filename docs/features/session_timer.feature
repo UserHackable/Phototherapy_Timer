@@ -5,6 +5,9 @@
 # Piezo GPIO25 end beep. Displays: LCD1602 + TM1637.
 # Wi‑Fi + UDP JSON discovery; SNTP fallback.
 # Key A: users list (household + Guest); digit 0–9: therapy → entry.
+# A then user then B then therapy assigns in one sequence (A1B4 = user 1, Eczema).
+# Keys typed during UDP fetches or the last-session hold are kept.
+# Last exposure is the user's newest lamp-on, regardless of therapy mode change.
 # Key B: therapy list; digit selects type; psoriasis then skin type 1–6.
 # Key C: recommended + step_seconds; D: recommended − step (EGT / Manual 15 s / else 10 s).
 # If recommended_seconds is 0 (too soon), C and D stay at 0.
@@ -149,6 +152,35 @@ Feature: Session timer entry and countdown
     And the TM1637 keeps showing wall clock HH:MM
     And pages advance every one second
     And after 30 seconds the UI returns to clock mode
+
+  Scenario: A then 1 then B then 4 assigns Eczema and shows last session like A+digit
+    Given household user 1 exists
+    And user 1's last lamp-on was 2:00 with no therapy type
+    When the user selects user 1 (A then 1) then eczema (B then 4)
+    Then the module assigns therapy_id 4 (Eczema) to user 1
+    And the LCD response is the same last-session screen as after A then 1
+    And last_duration_seconds is 120 (2:00)
+    And that 2:00 is the last time eczema uses
+    And the message is Last session, not "No prior session"
+    And if that last lamp-on were longer than eczema max, recommended would be the max once 44h have passed
+
+  Scenario: Recommended time is capped at the selected therapy max
+    Given the user selected household user "rob" via A then their id digit
+    And the last lamp-on was 5:00
+    And eczema is assigned with max_seconds 166
+    And it has been at least 44 hours since that lamp-on
+    When therapy is loaded
+    Then last_duration_seconds is 300
+    And recommended_seconds is 166
+    And the entry is programmed to 2:46
+
+  Scenario: After user is selected, B then 4 still uses that user's last lamp-on
+    Given household user 1 is already selected via A then 1
+    And the last session message showed 2:00
+    When the user presses "B" then "4"
+    Then eczema is assigned to user 1
+    And the LCD shows Last session / 2:00 again
+    And recommended_seconds follows the 44h rule from that 2:00 lamp-on
 
   Scenario: B then 1 assigns Manual and reloads recommendation
     Given the UI is paging the therapy list
@@ -385,6 +417,39 @@ Feature: Session timer entry and countdown
     And the module GETs /firmware/session_timer/manifest.json immediately
     And if the published version differs it installs and reboots
     And if it matches the LCD shows "Up to date" with the running version
+
+  Scenario: UDP key inject sets the test flag then handles the key
+    Given the module is listening on UDP 3000
+    When the host sends {"v":1,"type":"key","keys":"A1B4"}
+    Then the module remembers that host as the command peer
+    And it sets test true immediately before each injected key
+    And it handles those keys like the keypad (A then 1 then B then 4)
+    And the UDP ack includes test true, the keys, and a status snapshot
+    And later state changes are also sent as type status to that host
+    And a real keypad press clears test first, then queues that key
+
+  Scenario: Test mode does not energize the lamp SSR
+    Given test is true from a UDP key inject
+    When the session would turn the lamp on
+    Then the lamp SSR GPIO26 stays off
+    And status lamp is true
+    And the fan, countdown, LCD, and piezo still run as a real session
+    And an exposure UDP is sent with test true
+    And the server does not store that exposure as a last session
+
+  Scenario: UDP status check remembers the watcher and replies
+    Given the module is listening on UDP 3000
+    When the host sends {"v":1,"type":"watch"}
+    Then the module remembers that host as the watcher
+    And it replies with the current status snapshot
+    And later state changes are sent as type status to that watcher
+
+  Scenario: Unwatch stops status echoes
+    Given the module is echoing status to this host
+    When the host sends {"v":1,"type":"unwatch"}
+    Then the module forgets that watcher
+    And it stops sending status packets here
+    And the ack has ok true and watching false
 
   Scenario: Module reports UI state and display text
     Given the module has discovered the Rails server over UDP

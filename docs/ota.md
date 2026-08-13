@@ -74,21 +74,19 @@ To check **now** instead of waiting ~15 minutes: **Check for update** on
 Key **B** selects therapy / skin type (not OTA).
 
 Publish a new build from a machine with the toolchain and SSH/docker on ami
-(`OTA_SSH` defaults to the first reachable of `ami` or `deploy@192.168.1.202`):
+(`OTA_SSH` defaults to the first reachable of `ami` or `deploy@192.168.1.202`).
+The installed product module updates itself — do **not** USB-flash from pi
+for routine `session_timer` upgrades.
 
 ```bash
 ./scripts/fw idf ota-publish session_timer
-# re-flash the same version (recovery / force):
+# then /devices → Check for update (or wait for the idle poll)
+# same version again (recovery / force):
 OTA_FORCE=1 ./scripts/fw idf ota-publish session_timer
 ```
 
-**Pi (USB programming host):** module on `/dev/ttyUSB0`; repo often under
-`~/User-Hackable/Phototherapy_Timer`. After the one-time dual-OTA flash:
-
-```bash
-./scripts/fw idf ota-publish session_timer
-./scripts/fw idf monitor session_timer
-```
+USB serial is **recovery only** (partition table change, brick, first
+provision). After the one-time dual-OTA flash, leave the cable off.
 
 Serial while testing:
 

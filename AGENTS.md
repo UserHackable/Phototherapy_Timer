@@ -39,7 +39,8 @@ Manufacturer timer replacement exists; this repo deliberately replaces the faile
 - **Two tracks (both intentional):**
   - [`arduino_test_firmware/`](arduino_test_firmware/) — multi-sketch (mise + arduino-cli).
   - [`esp32_firmware/apps/`](esp32_firmware/apps/) — multi-app **ESP-IDF** (prefer for product logic).
-- **Single CLI:** [`scripts/fw`](scripts/fw) — `./scripts/fw arduino upload <sketch>`, `./scripts/fw idf upload <app>`. Do **not** add per-program scripts.
+- **Single CLI:** [`scripts/fw`](scripts/fw) — `./scripts/fw arduino upload <sketch>`, `./scripts/fw idf upload <app>`, `./scripts/fw idf ota-publish <app>`, `./scripts/fw idf key <keys>`, `./scripts/fw idf status`, `./scripts/fw idf unwatch`. Do **not** add per-program scripts.
+- **Product updates:** LAN OTA (`./scripts/fw idf ota-publish session_timer`, then `/devices` Check for update). USB `idf upload` is recovery / first dual-OTA flash only — do not USB-flash the installed module from pi.
 - Do not commit ESP-IDF clones or `~/.arduino15` cores.
 - Session decision log: [conversation-with-grok.md](conversation-with-grok.md).
 

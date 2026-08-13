@@ -17,9 +17,10 @@ stay aligned.
 | Item | Value |
 |------|--------|
 | Default session entry | `initial_seconds` (EGT listed initial; Manual / none **30 s**); `*` restores this |
-| Therapy recommendation | Last exposure after 44h, **0** if more recent, else `initial_seconds` |
+| Therapy recommendation | Last lamp-on after 44h (any therapy, including none), **capped at that therapy's max** if the last time is longer; **0** if more recent; else `initial_seconds` |
 | User list | Household **1–9**, then **0:Guest** |
 | Select user | **A** then digit **0–9** |
+| Assign therapy | **A** then user then **B** then therapy in one sequence (**A1B4** = user 1, Eczema). Last lamp-on still counts after a mode change. |
 | Select therapy | **B** then digit **1–4** (Manual / Psoriasis / Vitiligo / Eczema); psoriasis then skin **1–6** |
 | Initial dose | `initial_seconds` from assignment (EGT listed initial; Manual / none **30 s**) |
 | Step-up (C) | `recommended_seconds` + `step_seconds` (**10 s** if no therapy, **15 s** Manual, else EGT). Stays **0** if recommended is 0 |

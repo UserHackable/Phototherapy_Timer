@@ -82,32 +82,39 @@ class Exposure < ApplicationRecord
       newest_first.first
     end
 
-    def last_session_message_for(user)
-      return "No prior session" if user.nil?
+    # Newest lamp-on for this user. Therapy type is ignored: a mode change
+    # (or a session with no protocol) does not start a new last-exposure clock.
+    def last_for(user)
+      return if user.nil?
 
-      exp = where(user_id: user.id).newest_first.first
+      where(user_id: user.id).newest_first.first
+    end
+
+    def last_session_message_for(user)
+      exp = last_for(user)
       return "No prior session" if exp.nil?
 
       "Last session\n#{exp.last_session_detail_line}"
     end
 
     def last_duration_seconds_for(user)
-      return nil if user.nil?
-
-      where(user_id: user.id).newest_first.first&.duration_seconds
+      last_for(user)&.duration_seconds
     end
 
-    def recommended_seconds_for(user, default_seconds: 30)
+    def recommended_seconds_for(user, default_seconds: 30, max_seconds: nil)
       return default_seconds if user.nil?
 
-      exp = where(user_id: user.id).newest_first.first
+      exp = last_for(user)
       return default_seconds if exp.nil?
 
       elapsed = (Time.zone.now - exp.started_at).to_f
-      if elapsed >= THERAPY_REUSE_AFTER.to_f
-        exp.duration_seconds
+      return 0 if elapsed < THERAPY_REUSE_AFTER.to_f
+
+      dur = exp.duration_seconds
+      if max_seconds.is_a?(Integer) && max_seconds.positive? && dur > max_seconds
+        max_seconds
       else
-        0
+        dur
       end
     end
   end

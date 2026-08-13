@@ -133,6 +133,45 @@ class ExposureTest < ActiveSupport::TestCase
     end
   end
 
+  test "recommended_seconds_for caps last duration at therapy max" do
+    travel_to Time.zone.parse("2026-08-12 22:00:00") do
+      user = users(:unassigned)
+      Exposure.create!(user: user, started_at: 50.hours.ago, duration_seconds: 300)
+      assert_equal 166, Exposure.recommended_seconds_for(
+        user, default_seconds: 50, max_seconds: 166
+      )
+      assert_equal 300, Exposure.last_duration_seconds_for(user)
+    end
+  end
+
+  test "recommended_seconds_for stays zero when last exposure is recent even if over max" do
+    travel_to Time.zone.parse("2026-08-12 22:00:00") do
+      user = users(:unassigned)
+      Exposure.create!(user: user, started_at: 10.hours.ago, duration_seconds: 300)
+      assert_equal 0, Exposure.recommended_seconds_for(
+        user, default_seconds: 50, max_seconds: 166
+      )
+    end
+  end
+
+  test "last exposure is used regardless of therapy type" do
+    travel_to Time.zone.parse("2026-08-12 22:00:00") do
+      user = users(:unassigned)
+      Exposure.create!(
+        user: user,
+        started_at: 50.hours.ago,
+        duration_seconds: 120,
+        therapy_type: therapy_types(:psoriasis),
+        skin_type: skin_types(:one)
+      )
+      user.user_therapies.create!(therapy_type: therapy_types(:eczema))
+
+      assert_equal 120, Exposure.recommended_seconds_for(user, default_seconds: 50)
+      assert_equal 120, Exposure.last_duration_seconds_for(user)
+      assert_match(/Last session/, Exposure.last_session_message_for(user))
+    end
+  end
+
   test "last_session_message_for is two LCD lines" do
     travel_to Time.zone.parse("2026-08-10 12:00:00") do
       user = users(:fresh)
