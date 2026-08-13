@@ -918,7 +918,16 @@ static cJSON *status_object(void)
 
     int mm, ss;
     entry_to_mmss(s_entry, &mm, &ss);
+    if (mm < 0) {
+        mm = 0;
+    }
+    if (mm > 99) {
+        mm = 99;
+    }
     int sec_show = ss > 59 ? 59 : ss;
+    if (sec_show < 0) {
+        sec_show = 0;
+    }
     char entry[8];
     snprintf(entry, sizeof(entry), "%d:%02d", mm, sec_show);
     cJSON_AddStringToObject(st, "entry", entry);
