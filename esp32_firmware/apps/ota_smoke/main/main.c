@@ -3,8 +3,8 @@
  *
  * Minimal proof of Wi‑Fi OTA:
  *   1. NVS Wi‑Fi + DHCP
- *   2. Optional NVS discovery/server_ip hint (or wait for UDP later)
- *   3. uh_ota_check_and_update against http://<server>/firmware/ota_smoke/
+ *   2. DNS phototherapy.ami.lan, else NVS discovery/server_ip if on-subnet
+ *   3. uh_ota_check_and_update against http://<host>/firmware/ota_smoke/
  *
  *   ./scripts/fw idf nvs-wifi
  *   ./scripts/fw idf upload ota_smoke
@@ -22,6 +22,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "lwip/inet.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "uh_ota.h"
@@ -33,6 +36,7 @@ static const char *TAG = "ota_smoke";
 #define NVS_KEY_PASS   "password"
 #define NVS_NS_DISC    "discovery"
 #define NVS_KEY_SRV_IP "server_ip"
+#define SERVER_DNS_HOST "phototherapy.ami.lan"
 #define GOT_IP_BIT     BIT0
 
 static EventGroupHandle_t s_wifi_events;
@@ -90,6 +94,33 @@ static void nvs_load_server_ip(void)
     nvs_close(h);
 }
 
+static bool resolve_hostname4(const char *name, uint32_t *addr_nbo)
+{
+    if (!name || !name[0] || !addr_nbo) {
+        return false;
+    }
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
+    };
+    struct addrinfo *res = NULL;
+    int err = getaddrinfo(name, NULL, &hints, &res);
+    if (err != 0 || !res || !res->ai_addr) {
+        ESP_LOGW(TAG, "dns %s failed (%d)", name, err);
+        if (res) {
+            freeaddrinfo(res);
+        }
+        return false;
+    }
+    *addr_nbo = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+    char astr[16];
+    ip4_addr_t a = { .addr = *addr_nbo };
+    ip4addr_ntoa_r(&a, astr, sizeof(astr));
+    ESP_LOGI(TAG, "dns %s -> %s", name, astr);
+    freeaddrinfo(res);
+    return *addr_nbo != 0;
+}
+
 static bool wifi_start(void)
 {
     char ssid[33] = {0};
@@ -144,9 +175,15 @@ void app_main(void)
         return;
     }
 
-    if (s_server_ip[0] == '\0') {
-        ESP_LOGW(TAG, "no discovery/server_ip in NVS — set server_ip in secrets/wifi.yaml");
-        ESP_LOGW(TAG, "and re-run ./scripts/fw idf nvs-wifi");
+    const char *host = NULL;
+    uint32_t dns_addr = 0;
+    if (resolve_hostname4(SERVER_DNS_HOST, &dns_addr)) {
+        host = SERVER_DNS_HOST;
+    } else if (s_server_ip[0] != '\0') {
+        host = s_server_ip;
+        ESP_LOGW(TAG, "dns %s failed; falling back to NVS IP %s", SERVER_DNS_HOST, host);
+    } else {
+        ESP_LOGW(TAG, "no %s DNS and no discovery/server_ip in NVS", SERVER_DNS_HOST);
         return;
     }
 
@@ -154,12 +191,12 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(3000));
     uh_ota_mark_valid();
 
-    char *base = malloc(48);
+    char *base = malloc(64);
     if (!base) {
         ESP_LOGE(TAG, "oom");
         return;
     }
-    snprintf(base, 48, "http://%s", s_server_ip);
+    snprintf(base, 64, "http://%s", host);
 
     uh_ota_config_t *ota_cfg = calloc(1, sizeof(*ota_cfg));
     if (!ota_cfg) {

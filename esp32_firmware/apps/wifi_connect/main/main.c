@@ -2,8 +2,9 @@
  * ESP-IDF app: wifi_connect
  *
  * Reads one network from NVS namespace "wifi" (ssid, password).
- * Connects as STA (DHCP), discovers Rails via UDP JSON, sets wall clock
- * from the server pong; SNTP is fallback if discovery has no time.
+ * Connects as STA (DHCP), discovers Rails via UDP JSON + DNS names,
+ * sets wall clock from the server pong; SNTP is fallback if discovery
+ * has no time. Off-subnet NVS / pong IPs are ignored.
  *
  * After online:
  *   - UDP JSON discovery (ping identity, pong identity+ip+unix)
@@ -73,6 +74,8 @@ static const char *TAG = "wifi_connect";
 
 #define NVS_NS_DISC     "discovery"
 #define NVS_KEY_SRV_IP  "server_ip"
+#define SERVER_DNS_HOST0 "phototherapy.ami.lan"
+#define SERVER_DNS_HOST1 "phototherapy.lan"
 
 static EventGroupHandle_t s_wifi_events;
 static int s_retry;
@@ -92,6 +95,8 @@ static char s_server_identity[64];
 static bool s_have_server;
 static bool s_time_from_discovery;
 
+static void drop_off_subnet_server_addrs(void);
+
 static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
@@ -110,6 +115,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
                  IP2STR(&event->ip_info.gw));
         s_retry = 0;
         s_have_ip = true;
+        drop_off_subnet_server_addrs();
         /* Initial connect and every reconnect after a drop: refresh network time. */
         s_need_sntp = true;
         s_need_discovery = true;
@@ -284,6 +290,33 @@ static void build_device_identity(void)
     ESP_LOGI(TAG, "device identity: %s", s_device_identity);
 }
 
+static bool sta_ip_info(esp_netif_ip_info_t *out)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!netif || !out) {
+        return false;
+    }
+    return esp_netif_get_ip_info(netif, out) == ESP_OK && out->ip.addr != 0;
+}
+
+static bool ipv4_on_sta_subnet(uint32_t addr_nbo)
+{
+    esp_netif_ip_info_t info;
+    if (!sta_ip_info(&info) || addr_nbo == 0) {
+        return false;
+    }
+    return (addr_nbo & info.netmask.addr) == (info.ip.addr & info.netmask.addr);
+}
+
+static bool ipv4_str_on_sta_subnet(const char *ip)
+{
+    ip4_addr_t a;
+    if (!ip || !ip[0] || ip4addr_aton(ip, &a) == 0) {
+        return false;
+    }
+    return ipv4_on_sta_subnet(a.addr);
+}
+
 static void nvs_load_server_ip_hint(void)
 {
     nvs_handle_t h;
@@ -300,9 +333,21 @@ static void nvs_load_server_ip_hint(void)
     nvs_close(h);
 }
 
+static void nvs_clear_server_ip_hint(void)
+{
+    nvs_handle_t h;
+    s_server_ip_hint[0] = '\0';
+    if (nvs_open(NVS_NS_DISC, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    nvs_erase_key(h, NVS_KEY_SRV_IP);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 static void nvs_save_server_ip_hint(const char *ip)
 {
-    if (!ip || !ip[0]) {
+    if (!ip || !ip[0] || !ipv4_str_on_sta_subnet(ip)) {
         return;
     }
     nvs_handle_t h;
@@ -315,6 +360,46 @@ static void nvs_save_server_ip_hint(const char *ip)
     nvs_close(h);
     strncpy(s_server_ip_hint, ip, sizeof(s_server_ip_hint) - 1);
     s_server_ip_hint[sizeof(s_server_ip_hint) - 1] = '\0';
+}
+
+static void drop_off_subnet_server_addrs(void)
+{
+    if (s_server_ip[0] && !ipv4_str_on_sta_subnet(s_server_ip)) {
+        ESP_LOGW(TAG, "drop off-subnet server ip %s", s_server_ip);
+        s_server_ip[0] = '\0';
+        s_have_server = false;
+    }
+    if (s_server_ip_hint[0] && !ipv4_str_on_sta_subnet(s_server_ip_hint)) {
+        ESP_LOGW(TAG, "drop off-subnet NVS hint %s", s_server_ip_hint);
+        nvs_clear_server_ip_hint();
+    }
+}
+
+static bool resolve_hostname4(const char *name, uint32_t *addr_nbo)
+{
+    if (!name || !name[0] || !addr_nbo) {
+        return false;
+    }
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_DGRAM,
+    };
+    struct addrinfo *res = NULL;
+    int err = getaddrinfo(name, NULL, &hints, &res);
+    if (err != 0 || !res || !res->ai_addr) {
+        ESP_LOGW(TAG, "dns %s failed (%d)", name, err);
+        if (res) {
+            freeaddrinfo(res);
+        }
+        return false;
+    }
+    *addr_nbo = ((struct sockaddr_in *)res->ai_addr)->sin_addr.s_addr;
+    char astr[16];
+    ip4_addr_t a = { .addr = *addr_nbo };
+    ip4addr_ntoa_r(&a, astr, sizeof(astr));
+    ESP_LOGI(TAG, "dns %s -> %s", name, astr);
+    freeaddrinfo(res);
+    return *addr_nbo != 0;
 }
 
 static bool apply_unix_time(int64_t unix_sec)
@@ -354,13 +439,21 @@ static bool parse_json_pong(const char *msg, const char *from_ip)
         s_server_identity[sizeof(s_server_identity) - 1] = '\0';
     }
     s_server_ip[0] = '\0';
-    if (cJSON_IsString(ip) && ip->valuestring && ip->valuestring[0]) {
-        strncpy(s_server_ip, ip->valuestring, sizeof(s_server_ip) - 1);
-        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
-    } else if (from_ip && from_ip[0]) {
-        strncpy(s_server_ip, from_ip, sizeof(s_server_ip) - 1);
-        s_server_ip[sizeof(s_server_ip) - 1] = '\0';
+    const char *advertised = (cJSON_IsString(ip) && ip->valuestring && ip->valuestring[0])
+                                 ? ip->valuestring
+                                 : NULL;
+    if (ipv4_str_on_sta_subnet(advertised)) {
+        strncpy(s_server_ip, advertised, sizeof(s_server_ip) - 1);
+    } else {
+        if (advertised) {
+            ESP_LOGW(TAG, "pong ip %s is off-subnet; using UDP source %s",
+                     advertised, from_ip && from_ip[0] ? from_ip : "-");
+        }
+        if (from_ip && from_ip[0]) {
+            strncpy(s_server_ip, from_ip, sizeof(s_server_ip) - 1);
+        }
     }
+    s_server_ip[sizeof(s_server_ip) - 1] = '\0';
     if (cJSON_IsString(tz_posix) && tz_posix->valuestring && tz_posix->valuestring[0]) {
         setenv("TZ", tz_posix->valuestring, 1);
         tzset();
@@ -449,9 +542,23 @@ static bool discovery_once(void)
     ESP_LOGI(TAG, "discovery payload: %s", payload);
 
     {
+        static const char *hosts[] = { SERVER_DNS_HOST0, SERVER_DNS_HOST1 };
+        for (size_t i = 0; i < sizeof(hosts) / sizeof(hosts[0]); i++) {
+            uint32_t addr = 0;
+            if (!resolve_hostname4(hosts[i], &addr)) {
+                continue;
+            }
+            if (!ipv4_on_sta_subnet(addr)) {
+                ESP_LOGW(TAG, "dns %s is off-subnet — skip", hosts[i]);
+                continue;
+            }
+            discovery_send(sock, payload, plen, addr, hosts[i]);
+        }
+    }
+    {
         ip4_addr_t known;
         const char *hint = s_server_ip[0] ? s_server_ip : s_server_ip_hint;
-        if (hint[0] && ip4addr_aton(hint, &known)) {
+        if (hint[0] && ip4addr_aton(hint, &known) && ipv4_on_sta_subnet(known.addr)) {
             discovery_send(sock, payload, plen, known.addr, "last server");
         }
     }

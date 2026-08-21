@@ -22,7 +22,7 @@ extern "C" {
 typedef bool (*uh_ota_may_start_fn)(void);
 
 typedef struct {
-    /** e.g. "http://192.168.1.202" — no trailing slash */
+    /** e.g. "http://phototherapy.ami.lan" — no trailing slash */
     const char *base_url;
     /** e.g. "session_timer" → /firmware/session_timer/manifest.json */
     const char *app_name;

@@ -4,6 +4,8 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 # LAN NTP + public fallbacks (session_timer SNTP_SERVER_*)
 CONFIG_LWIP_SNTP_MAX_SERVERS=3
+# DNS + JSON on the main path (discovery runs in its own 8k task).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Dual OTA on 4MB (see esp32_firmware/partitions/partitions_two_ota_4mb.csv).
 # Partition-table changes require a full USB flash (not app-only OTA).

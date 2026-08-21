@@ -1,0 +1,8 @@
+# Discovered devices (from development database).
+---
+- identity: host-test
+  ip: 127.0.0.1
+- identity: host-retest
+  ip: 192.168.1.163
+- identity: esp32-b4bfe9e70e64
+  ip: 192.168.1.243

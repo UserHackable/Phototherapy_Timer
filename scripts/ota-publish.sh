@@ -7,7 +7,7 @@
 #
 # Env:
 #   OTA_SSH    SSH host with docker access to the web container
-#              (default: first that works among ami, deploy@192.168.1.202)
+#              (default: first that works among ami, gluttony, deploy@192.168.72.2)
 #   OTA_FORCE  if 1, set "force": true in manifest (re-flash same version)
 set -euo pipefail
 
@@ -41,7 +41,7 @@ pick_ota_ssh() {
     return
   fi
   local host
-  for host in ami deploy@192.168.1.202; do
+  for host in ami gluttony deploy@192.168.72.2; do
     if ssh -o BatchMode=yes -o ConnectTimeout=4 "$host" "true" 2>/dev/null; then
       echo "$host"
       return
@@ -99,5 +99,5 @@ tar -C "$STAGE" -cf - app.bin manifest.json \
     "docker exec -i $WEB tar -C /rails/storage/firmware/$APP -xf -"
 
 echo "OK: published $APP version=$VERSION"
-echo "    http://192.168.1.202/firmware/$APP/manifest.json"
-echo "    http://phototherapy.ami.lan/firmware/$APP/manifest.json  (with Host/DNS)"
+echo "    http://phototherapy.ami.lan/firmware/$APP/manifest.json"
+echo "    http://phototherapy.lan/firmware/$APP/manifest.json"
